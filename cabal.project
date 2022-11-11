@@ -1,0 +1,5 @@
+packages:
+  "."
+package squeal-postgresql-qq
+  ghc-options:
+    -Werror
