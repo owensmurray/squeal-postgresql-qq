@@ -2,19 +2,22 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Main (main) where
 
+import Squeal.QuasiQuotes (Field, ssql, withDB)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Squeal.PostgreSQL (type (:::), type (:=>), NullType(NotNull, Null),
   Optionality(Def, NoDef), PGType(PGint4, PGtext), RenderSQL(renderSQL),
   SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), Public,
   Statement)
-import Squeal.QuasiQuotes (ssql)
+import Squeal.QuasiQuotes (ssql, withDB)
 import Test.Hspec (describe, hspec, it)
 import qualified Generics.SOP as SOP (Generic, HasDatatypeInfo)
 
@@ -44,6 +47,14 @@ data User = User
   deriving stock (Show, Generic)
   deriving anyclass (SOP.Generic, SOP.HasDatatypeInfo)
 
+data NotUser = NotUser
+  {    notId :: Int
+  ,  notName :: Text
+  -- , whatever :: Text
+  }
+  deriving stock (Show, Generic)
+  deriving anyclass (SOP.Generic, SOP.HasDatatypeInfo)
+
 
 main :: IO ()
 main =
@@ -64,7 +75,8 @@ main =
             :> ...` instead of checking against a possibly ambiguous
             type variable.
           -}
-          statement :: Statement DB () User
-          statement = [ssql| select * from users |]
+          statement :: Statement DB () _
+          statement = withDB @DB [ssql| select * from users |]
         print $ renderSQL statement
+
 

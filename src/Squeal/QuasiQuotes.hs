@@ -1,8 +1,12 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
 module Squeal.QuasiQuotes (
   ssql,
+  withDB,
+  Statement,
+  Field(..),
 ) where
 
 
@@ -11,13 +15,12 @@ import Language.Haskell.TH.Quote (QuasiQuoter(QuasiQuoter, quoteDec,
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Language.SQL.SimpleSQL.Dialect (postgres)
 import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
-import Squeal.PostgreSQL (Aliasable(as), Selection(Star), from, query,
-  select, table)
-import qualified Language.SQL.SimpleSQL.Syntax as AST (Name(Name),
-  QueryExpr(Select, qeFrom, qeGroupBy, qeHaving, qeOffset, qeOrderBy,
-  qeSelectList, qeSetQuantifier, qeWhere), ScalarExpr(Star),
-  SetQuantifier(SQDefault), Statement(SelectStatement),
-  TableRef(TRSimple))
+import Squeal.PostgreSQL (Aliasable(as), Selection(Star), from, select,
+  table)
+import Squeal.QuasiQuotes.RowType (Field(Field, unField),
+  Statement(unStatement), query)
+import qualified Language.SQL.SimpleSQL.Syntax as AST
+import qualified Squeal.PostgreSQL as Squeal
 
 
 ssql :: QuasiQuoter  
@@ -62,7 +65,11 @@ toSquealQuery = \case
     ->
       {-
         moral equivalent of:
-        > query (select Star (from (table (#theTable `as` #theTable))))
+        >
+          let
+            theQuery = query (select Star (from (table (#theTable `as` #theTable))))
+          in
+            theQuery
       -}
       pure $
         VarE 'query
@@ -88,5 +95,12 @@ toSquealQuery = \case
 
   unsupported ->
     error $ "Unsupported: " <> show unsupported
+
+
+withDB
+  :: forall db params row.
+     Statement db params row
+  -> Squeal.Statement db params row
+withDB = unStatement
 
 
