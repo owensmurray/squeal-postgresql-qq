@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -29,6 +28,7 @@ module Squeal.QuasiQuotes.RowType (
 
 import Data.Kind (Type)
 import Data.Text (Text)
+import Data.UUID (UUID)
 import GHC.OverloadedLabels (fromLabel)
 import GHC.TypeLits (Symbol)
 import Generics.SOP (SListI)
@@ -54,17 +54,18 @@ type family RowType a where
     (Field fld (UnPG typ), RowType more)
   RowType (fld ::: 'Null typ ': more) =
     (Field fld (Maybe (UnPG typ)), RowType more)
-  RowType ('[]) = ()
+  RowType '[] = ()
 
 
 {- | Converts PGTypes to Haskell types. This is the inverse of 'Squeal.PG'. -}
 type family UnPG (a :: Squeal.PGType) :: Type where
   UnPG 'Squeal.PGbool = Bool
   UnPG 'Squeal.PGtext = Text
+  UnPG 'Squeal.PGuuid = UUID
   {- Not complete ...  -}
 
 
-data Field (name :: Symbol) a = Field
+newtype Field (name :: Symbol) a = Field
   { unField :: a
   }
 instance
