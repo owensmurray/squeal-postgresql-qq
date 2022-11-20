@@ -10,14 +10,14 @@
 
 module Main (main) where
 
-import Squeal.QuasiQuotes (Field, ssql, withDB)
+import Squeal.QuasiQuotes (Field, ssql)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Squeal.PostgreSQL (type (:::), type (:=>), NullType(NotNull, Null),
   Optionality(Def, NoDef), PGType(PGint4, PGtext), RenderSQL(renderSQL),
   SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), Public,
   Statement)
-import Squeal.QuasiQuotes (ssql, withDB)
+import Squeal.QuasiQuotes (ssql)
 import Test.Hspec (describe, hspec, it)
 import qualified Generics.SOP as SOP (Generic, HasDatatypeInfo)
 
@@ -76,7 +76,7 @@ main =
             type variable.
           -}
           statement :: Statement DB () _
-          statement = withDB @DB [ssql| select * from users |]
+          statement = [ssql| select * from users |]
         print $ renderSQL statement
 
 

@@ -4,8 +4,6 @@
 
 module Squeal.QuasiQuotes (
   ssql,
-  withDB,
-  Statement,
   Field(..),
 ) where
 
@@ -17,10 +15,8 @@ import Language.SQL.SimpleSQL.Dialect (postgres)
 import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
 import Squeal.PostgreSQL (Aliasable(as), Selection(Star), from, select,
   table)
-import Squeal.QuasiQuotes.RowType (Field(Field, unField),
-  Statement(unStatement), query)
+import Squeal.QuasiQuotes.RowType (Field(Field, unField), query)
 import qualified Language.SQL.SimpleSQL.Syntax as AST
-import qualified Squeal.PostgreSQL as Squeal
 
 
 ssql :: QuasiQuoter  
@@ -95,12 +91,5 @@ toSquealQuery = \case
 
   unsupported ->
     error $ "Unsupported: " <> show unsupported
-
-
-withDB
-  :: forall db params row.
-     Statement db params row
-  -> Squeal.Statement db params row
-withDB = unStatement
 
 
