@@ -11,7 +11,7 @@ import Data.List (foldl')
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Squeal.PostgreSQL (Aliasable(as), IsQualified((!)), Selection(Also,
   Star), from, select, table)
-import Squeal.QuasiQuotes.RowType (query)
+import Squeal.QuasiQuotes.RowType (monoQuery)
 import qualified Language.SQL.SimpleSQL.Syntax as AST
 
 
@@ -30,10 +30,10 @@ toSquealQuery = \case
     ->
       {-
         moral equivalent of:
-        > query (select Star (from (table (#theTable `as` #theTable))))
+        > monoQuery (select Star (from (table (#theTable `as` #theTable))))
       -}
       pure $
-        VarE 'query
+        VarE 'monoQuery
         `AppE`
           (
             VarE 'select

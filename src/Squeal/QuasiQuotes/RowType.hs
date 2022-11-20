@@ -22,7 +22,7 @@
 -}
 module Squeal.QuasiQuotes.RowType (
   RowType,
-  query,
+  monoQuery,
   Field(..),
 ) where
 
@@ -83,7 +83,7 @@ instance
   template haskell code so it can simply quote this function instead of
   having to basically inline it directly in TH.
 -}
-query
+monoQuery
   :: forall db params input row ignored.
      ( HasRowDecoder row (RowType row)
      , SListI row
@@ -91,7 +91,7 @@ query
      )
   => Squeal.Query '[] '[] db params row
   -> Squeal.Statement db input (RowType row)
-query = Squeal.Query Squeal.genericParams getRowDecoder
+monoQuery = Squeal.Query Squeal.genericParams getRowDecoder
 
 
 class HasRowDecoder row x where
