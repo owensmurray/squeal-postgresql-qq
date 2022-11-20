@@ -61,11 +61,7 @@ toSquealQuery = \case
     ->
       {-
         moral equivalent of:
-        >
-          let
-            theQuery = query (select Star (from (table (#theTable `as` #theTable))))
-          in
-            theQuery
+        > query (select Star (from (table (#theTable `as` #theTable))))
       -}
       pure $
         VarE 'query
