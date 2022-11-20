@@ -1,9 +1,8 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -28,6 +27,7 @@ module Squeal.QuasiQuotes.RowType (
   Field(..),
 ) where
 
+import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.OverloadedLabels (fromLabel)
 import GHC.TypeLits (Symbol)
@@ -36,25 +36,52 @@ import Squeal.PostgreSQL (NullType(NotNull, Null), (:::))
 import qualified Squeal.PostgreSQL as Squeal
 
 
+{- |
+  Given an Squeal row specification, produce a corresponding haskell
+  tuple type of the form:
+
+  > (Field name1 type1,
+  > (Field name2 type2,
+  > (Field name3 type3,
+  > (<continue nesting>)))
+
+  where the "name<N>" are phantom types of kind `Symbol`, which provide
+  the name of the corresponding column, and types "type<N>" are whatever
+  appropriate haskell type represents the postgres column type.
+-}
 type family RowType a where
   RowType (fld ::: 'NotNull typ ': more) =
-    (Field fld (PGToHaskell typ), RowType more)
+    (Field fld (UnPG typ), RowType more)
   RowType (fld ::: 'Null typ ': more) =
-    (Field fld (Maybe (PGToHaskell typ)), RowType more)
+    (Field fld (Maybe (UnPG typ)), RowType more)
   RowType ('[]) = ()
 
-type family PGToHaskell (a :: Squeal.PGType) where
-  PGToHaskell 'Squeal.PGbool = Bool
-  PGToHaskell 'Squeal.PGtext = Text
+
+{- | Converts PGTypes to Haskell types. This is the inverse of 'Squeal.PG'. -}
+type family UnPG (a :: Squeal.PGType) :: Type where
+  UnPG 'Squeal.PGbool = Bool
+  UnPG 'Squeal.PGtext = Text
+  {- Not complete ...  -}
 
 
 data Field (name :: Symbol) a = Field
   { unField :: a
   }
-instance (Squeal.FromValue pg hask) => Squeal.FromValue pg (Field name hask) where
-  fromValue mbs = Field @name <$> Squeal.fromValue @pg mbs
+instance
+    ( Squeal.FromValue pg hask
+    )
+  =>
+    Squeal.FromValue pg (Field name hask)
+  where
+    fromValue mbs = Field @name <$> Squeal.fromValue @pg mbs
 
 
+{- |
+  Like 'Squeal.query', but use the monomorphizing 'RowType' family to
+  fully specify the output rows. This is mainly a convenience to the
+  template haskell code so it can simply quote this function instead of
+  having to basically inline it directly in TH.
+-}
 query
   :: forall db params input row ignored.
      ( HasRowDecoder row (RowType row)
@@ -63,26 +90,24 @@ query
      )
   => Squeal.Query '[] '[] db params row
   -> Squeal.Statement db input (RowType row)
-query q =
-  Squeal.Query
-    Squeal.genericParams
-    getRowDecoder
-    q
+query = Squeal.Query Squeal.genericParams getRowDecoder
 
 
 class HasRowDecoder row x where
   getRowDecoder :: Squeal.DecodeRow row x
-
-instance (Squeal.FromValue typ t, HasRowDecoder spec more) => HasRowDecoder ((fld ::: typ) ': spec)  (Field fld t, more) where
-  getRowDecoder = do
-    Squeal.consRow
-      (,)
-      (fromLabel @fld)
-      (getRowDecoder @spec @more)
+instance
+    ( HasRowDecoder moreRow moreFields
+    , Squeal.FromValue typ t
+    )
+  =>
+    HasRowDecoder ((fld ::: typ) ': moreRow)  (Field fld t, moreFields)
+  where
+    getRowDecoder =
+      Squeal.consRow
+        (,)
+        (fromLabel @fld)
+        (getRowDecoder @moreRow @moreFields)
 instance () => HasRowDecoder '[] () where
   getRowDecoder = pure ()
-
--- class DecodeField pgtype a where
---   decodeField
 
 
