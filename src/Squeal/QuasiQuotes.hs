@@ -9,7 +9,7 @@ module Squeal.QuasiQuotes (
 
 import Language.Haskell.TH.Quote (QuasiQuoter(QuasiQuoter, quoteDec,
   quoteExp, quotePat, quoteType))
-import Language.Haskell.TH.Syntax (Exp, Q)
+import Language.Haskell.TH.Syntax (Exp, Q, runIO)
 import Language.SQL.SimpleSQL.Dialect (postgres)
 import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
@@ -30,7 +30,9 @@ ssql =
 toSqueal :: Either ParseError AST.Statement -> Q Exp
 toSqueal = \case
   Left err -> fail (show err)
-  Right statement -> toSquealStatement statement
+  Right statement -> do
+    runIO (print statement)
+    toSquealStatement statement
 
 
 toSquealStatement :: AST.Statement -> Q Exp

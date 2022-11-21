@@ -66,16 +66,19 @@ main =
                  ()))))
           statement = [ssql| select * from users |]
         print $ renderSQL statement
+
       it "select user.name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
           statement = [ssql| select users.name from users |]
         print $ renderSQL statement
+
       it "select name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
           statement = [ssql| select name from users |]
         print $ renderSQL statement
+
       it "select name, id from users" $ do
         let
           statement
@@ -85,6 +88,7 @@ main =
                  ()))
           statement = [ssql| select name, id from users |]
         print $ renderSQL statement
+
       it "select id, name from users" $ do
         let
           statement
@@ -94,6 +98,7 @@ main =
                  ()))
           statement = [ssql| select id, name from users |]
         print $ renderSQL statement
+
       it "select users.id, employee_id from users" $ do
         let
           statement
@@ -102,6 +107,38 @@ main =
                  (Field "employee_id" UUID,
                  ()))
           statement = [ssql| select users.id, employee_id from users |]
+        print $ renderSQL statement
+
+      it "select users.* from users" $ do
+        let
+          statement
+            :: Statement DB ()
+                 (Field "id" Text,
+                 (Field "name" Text,
+                 (Field "employee_id" UUID,
+                 (Field "bio" (Maybe Text),
+                 ()))))
+          statement = [ssql| select users.* from users |]
+        print $ renderSQL statement
+
+      it "select users.id, employee_id as emp_id from users" $ do
+        let
+          statement
+            :: Statement DB ()
+                 (Field "id" Text,
+                 (Field "emp_id" UUID,
+                 ()))
+          statement = [ssql| select users.id, employee_id as emp_id from users |]
+        print $ renderSQL statement
+
+      it "select users.id as user_id, employee_id from users" $ do
+        let
+          statement
+            :: Statement DB ()
+                 (Field "user_id" Text,
+                 (Field "employee_id" UUID,
+                 ()))
+          statement = [ssql| select users.id as user_id, employee_id from users |]
         print $ renderSQL statement
 
 
