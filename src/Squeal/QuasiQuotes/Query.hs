@@ -24,7 +24,7 @@ toSquealQuery = \case
   Select
       { qeSetQuantifier = SQDefault
       , qeSelectList    = selectionList
-      , qeFrom          = [TRSimple [Name Nothing theTable]]
+      , qeFrom          = [selectionFrom]
       , qeWhere         = Nothing
       , qeGroupBy       = []
       , qeHaving        = Nothing
@@ -46,19 +46,25 @@ toSquealQuery = \case
               (
                 VarE 'S.from
                 `AppE`
-                  (
-                    VarE 'S.table
-                    `AppE`
-                      (
-                        VarE 'S.as
-                        `AppE` LabelE theTable
-                        `AppE` LabelE theTable
-                      )
-                  )
+                  renderTableRef selectionFrom
               )
           )
   unsupported ->
     fail $ "Unsupported: " <> show unsupported
+
+
+renderTableRef :: TableRef -> Exp
+renderTableRef = \case
+  TRSimple [Name Nothing theTable] ->
+    VarE 'S.table
+    `AppE`
+      (
+        VarE 'S.as
+        `AppE` LabelE theTable
+        `AppE` LabelE theTable
+      )
+  unsupported ->
+    error $ "Unsupported: " <> show unsupported
 
 
 renderSelectionList :: [(ScalarExpr, Maybe Name)] -> Exp
