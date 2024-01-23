@@ -3,3 +3,10 @@ packages:
 package squeal-postgresql-qq
   ghc-options:
     -Werror
+
+allow-newer:
+  records-sop:ghc-prim
+  , records-sop:deepseq
+  , simple-sql-parser:mtl
+
+
