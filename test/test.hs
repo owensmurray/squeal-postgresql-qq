@@ -144,6 +144,21 @@ main =
           statement = [ssql| select users.id as user_id, employee_id from users |]
         printQuery statement
 
+      it "select users.id from users left outer join emails on users.id == emails.user_id" $ do
+        let
+          statement
+            :: Statement DB ()
+                 (Field "id" Text,
+                 ())
+          statement =
+            [ssql|
+              select users.id
+              from users
+              left outer join emails
+              on emails.user_id = users.id
+            |]
+        printQuery statement
+
 
 printQuery :: RenderSQL a => a -> IO ()
 printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL

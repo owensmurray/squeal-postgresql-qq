@@ -9,12 +9,13 @@ module Squeal.QuasiQuotes.Query (
 
 import Data.List (foldl')
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
-import Language.SQL.SimpleSQL.Syntax (Name(Name), QueryExpr(Select,
-  qeFrom, qeGroupBy, qeHaving, qeOffset, qeOrderBy, qeSelectList,
-  qeSetQuantifier, qeWhere), ScalarExpr(BinOp, Iden, Star),
-  SetQuantifier(SQDefault), TableRef(TRSimple))
-import Prelude (Applicative(pure), Maybe(Just, Nothing), MonadFail(fail),
-  Semigroup((<>)), Show(show), ($), error)
+import Language.SQL.SimpleSQL.Syntax (JoinCondition(JoinOn),
+  JoinType(JLeft), Name(Name), QueryExpr(Select, qeFrom, qeGroupBy,
+  qeHaving, qeOffset, qeOrderBy, qeSelectList, qeSetQuantifier,
+  qeWhere), ScalarExpr(BinOp, Iden, Star), SetQuantifier(SQDefault),
+  TableRef(TRJoin, TRSimple))
+import Prelude (Applicative(pure), Bool(False), Maybe(Just, Nothing),
+  MonadFail(fail), Semigroup((<>)), Show(show), ($), error)
 import Squeal.QuasiQuotes.RowType (monoQuery)
 import qualified Squeal.PostgreSQL as S
 
@@ -55,16 +56,27 @@ toSquealQuery = \case
 
 renderTableRef :: TableRef -> Exp
 renderTableRef = \case
-  TRSimple [Name Nothing theTable] ->
-    VarE 'S.table
-    `AppE`
-      (
-        VarE 'S.as
-        `AppE` LabelE theTable
-        `AppE` LabelE theTable
-      )
-  unsupported ->
-    error $ "Unsupported: " <> show unsupported
+    TRSimple [Name Nothing theTable] ->
+      VarE 'S.table
+      `AppE`
+        (
+          VarE 'S.as
+          `AppE` LabelE theTable
+          `AppE` LabelE theTable
+        )
+    TRJoin left False JLeft right (Just condition) ->
+      VarE 'S.leftOuterJoin
+      `AppE` renderTableRef right
+      `AppE` renderJoinCondition condition
+      `AppE` renderTableRef left
+    unsupported ->
+      error $ "Unsupported: " <> show unsupported
+  where
+    renderJoinCondition = \case
+      (JoinOn expr) ->
+        renderScalarExpr expr
+      unsupported ->
+        error $ "Unsupported: " <> show unsupported
 
 
 renderSelectionList :: [(ScalarExpr, Maybe Name)] -> Exp
@@ -105,6 +117,10 @@ renderScalarExpr = \case
       more
   BinOp left [Name Nothing "."] Star ->
     ConE 'S.DotStar `AppE` renderScalarExpr left
+  (BinOp left [Name Nothing "="] right) ->
+    VarE '(S..==)
+      `AppE` renderScalarExpr left
+      `AppE` renderScalarExpr right
   unsupported ->
     error $ "unsupported: " <> show unsupported
 
