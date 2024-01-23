@@ -1,0 +1,128 @@
+on: [push]
+name: Haskell Builds
+jobs:
+  build:
+    name: Haskell Build
+    runs-on: ubuntu-latest # or macOS-latest, or windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc-version:
+          - '9.8'
+        cabal-version: ['3.10.2.0']
+    steps:
+      # Checkout
+      - uses: actions/checkout@v3
+        
+      # Setup
+      - name: Setup Haskell
+        uses: haskell-actions/setup@v2
+        id: setup
+        if: steps.tooling-cache.outputs.cache-hit != 'true'
+        with:
+          ghc-version: ${{ matrix.ghc-version }}
+          cabal-version: ${{ matrix.cabal-version }}
+
+      # Generate Plan
+      - name: Configure the Build
+        run: |
+          rm cabal.project.freeze
+          cabal configure
+          cabal build --dry-run
+
+      # Restore cache
+      - name: Restore cached dependencies
+        uses: actions/cache/restore@v3
+        id: cache
+        env:
+          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ env.key }}-plan-${{ hashFiles('**/plan.json') }}
+
+      # Build deps (for caching)
+      - name: Cabal build dependencies
+        run: cabal build all --only-dependencies
+
+      # Save dependency cache
+      - name: Save cache
+        uses: actions/cache/save@v3
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      # Cabal build
+      - name: Cabal Bulid
+        run: |
+          project="$(cat cabal.project | grep -v -- '-Werror')"
+          echo "$project" > cabal.project
+          cabal build all
+
+  # build-lower-bounds:
+  #   name: Haskell Build (lower bounds)
+  #   runs-on: ubuntu-latest # or macOS-latest, or windows-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       ghc-version: ['9.8.1']
+  #       cabal-version: ['3.10.2.0']
+  #   steps:
+  #     # Checkout
+  #     - uses: actions/checkout@v3
+  #       
+  #     # Setup
+  #     - name: Setup Haskell
+  #       uses: haskell-actions/setup@v2
+  #       id: setup
+  #       if: steps.tooling-cache.outputs.cache-hit != 'true'
+  #       with:
+  #         ghc-version: ${{ matrix.ghc-version }}
+  #         cabal-version: ${{ matrix.cabal-version }}
+
+  #     # Generate Plan
+  #     - name: Configure the Build
+  #       run: |
+  #         (cat << EOF
+  #         packages: .
+  #         constraints:
+  #           base == 4.19.0.0,
+  #           generics-sop == 0.5.1.4,
+  #           hspec == 2.11.7,
+  #           simple-sql-parser == 0.6.0,
+  #           squeal-postgresql == 0.9.1.3,
+  #           template-haskell == 2.21.0.0,
+  #           text == 2.1,
+  #           uuid == 1.3.15
+  #         EOF
+  #         ) > cabal.project
+  #         rm cabal.project.freeze
+  #         cabal configure
+  #         cabal build --dry-run
+
+  #     # Restore cache
+  #     - name: Restore cached dependencies
+  #       uses: actions/cache/restore@v3
+  #       id: cache
+  #       env:
+  #         key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
+  #       with:
+  #         path: ${{ steps.setup.outputs.cabal-store }}
+  #         key: ${{ env.key }}-plan-${{ hashFiles('**/plan.json') }}
+
+  #     # Build deps (for caching)
+  #     - name: Cabal build dependencies
+  #       run: cabal build all --only-dependencies
+
+  #     # Save dependency cache
+  #     - name: Save cache
+  #       uses: actions/cache/save@v3
+  #       if: steps.cache.outputs.cache-hit != 'true'
+  #       with:
+  #         path: ${{ steps.setup.outputs.cabal-store }}
+  #         key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  #     # Cabal build
+  #     - name: Cabal Bulid
+  #       run: cabal build all
+
