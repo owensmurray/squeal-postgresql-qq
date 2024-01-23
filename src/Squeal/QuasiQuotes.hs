@@ -1,6 +1,10 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
 
+{-|
+  Description: quasiquoter understanding SQL and producing
+  `squeal-postgresql` expressions.
+-}
 module Squeal.QuasiQuotes (
   ssql,
   Field(..),
