@@ -97,8 +97,8 @@ renderScalarExpr = \case
       )
       (LabelE name)
       more
-  BinOp (Iden [Name _ name]) [Name Nothing "."] Star ->
-    ConE 'S.DotStar `AppE` LabelE name
+  BinOp left [Name Nothing "."] Star ->
+    ConE 'S.DotStar `AppE` renderScalarExpr left
   unsupported ->
     error $ "unsupported: " <> show unsupported
 
