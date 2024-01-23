@@ -9,23 +9,27 @@ module Squeal.QuasiQuotes.Query (
 
 import Data.List (foldl')
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
-import Squeal.PostgreSQL (Aliasable(as), IsQualified((!)), Selection(Also,
-  DotStar, Star), from, select, table)
+import Language.SQL.SimpleSQL.Syntax (Name(Name), QueryExpr(Select,
+  qeFrom, qeGroupBy, qeHaving, qeOffset, qeOrderBy, qeSelectList,
+  qeSetQuantifier, qeWhere), ScalarExpr(BinOp, Iden, Star),
+  SetQuantifier(SQDefault), TableRef(TRSimple))
+import Prelude (Applicative(pure), Maybe(Just, Nothing), MonadFail(fail),
+  Semigroup((<>)), Show(show), ($), error)
 import Squeal.QuasiQuotes.RowType (monoQuery)
-import qualified Language.SQL.SimpleSQL.Syntax as AST
+import qualified Squeal.PostgreSQL as S
 
 
-toSquealQuery :: AST.QueryExpr -> Q Exp
+toSquealQuery :: QueryExpr -> Q Exp
 toSquealQuery = \case
-  AST.Select
-      { AST.qeSetQuantifier = AST.SQDefault
-      , AST.qeSelectList    = selectionList
-      , AST.qeFrom          = [AST.TRSimple [AST.Name Nothing theTable]]
-      , AST.qeWhere         = Nothing
-      , AST.qeGroupBy       = []
-      , AST.qeHaving        = Nothing
-      , AST.qeOrderBy       = []
-      , AST.qeOffset        = Nothing
+  Select
+      { qeSetQuantifier = SQDefault
+      , qeSelectList    = selectionList
+      , qeFrom          = [TRSimple [Name Nothing theTable]]
+      , qeWhere         = Nothing
+      , qeGroupBy       = []
+      , qeHaving        = Nothing
+      , qeOrderBy       = []
+      , qeOffset        = Nothing
       }
     ->
       {-
@@ -36,17 +40,17 @@ toSquealQuery = \case
         VarE 'monoQuery
         `AppE`
           (
-            VarE 'select
+            VarE 'S.select
             `AppE` renderSelectionList selectionList
             `AppE`
               (
-                VarE 'from
+                VarE 'S.from
                 `AppE`
                   (
-                    VarE 'table
+                    VarE 'S.table
                     `AppE`
                       (
-                        VarE 'as
+                        VarE 'S.as
                         `AppE` LabelE theTable
                         `AppE` LabelE theTable
                       )
@@ -57,7 +61,7 @@ toSquealQuery = \case
     fail $ "Unsupported: " <> show unsupported
 
 
-renderSelectionList :: [(AST.ScalarExpr, Maybe AST.Name)] -> Exp
+renderSelectionList :: [(ScalarExpr, Maybe Name)] -> Exp
 renderSelectionList selectionList =
     case selectionList of
       [(field, alias)] ->
@@ -69,31 +73,31 @@ renderSelectionList selectionList =
           in the right order. I'm not sure if Squeal gets it backwards,
           or the sql parser does, or if we are reversing them somewhere.
         -}
-        ConE 'Also
+        ConE 'S.Also
         `AppE` renderSelectionList more
         `AppE` renderAlias (renderSelection field) alias
       [] -> error "Empty selection list not supported."
   where
-    renderAlias :: Exp -> Maybe AST.Name -> Exp
+    renderAlias :: Exp -> Maybe Name -> Exp
     renderAlias e = \case
       Nothing -> e
-      Just (AST.Name _ alias) ->
-        VarE 'as
+      Just (Name _ alias) ->
+        VarE 'S.as
         `AppE` e
         `AppE` LabelE alias
 
-    renderSelection :: AST.ScalarExpr -> Exp
+    renderSelection :: ScalarExpr -> Exp
     renderSelection = \case
-      AST.Star -> ConE 'Star
-      AST.Iden (AST.Name _ name:more) ->
+      Star -> ConE 'S.Star
+      Iden (Name _ name:more) ->
         foldl'
-          (\acc (AST.Name _ n) ->
-            VarE '(!) `AppE` acc `AppE` LabelE n
+          (\acc (Name _ n) ->
+            VarE '(S.!) `AppE` acc `AppE` LabelE n
           )
           (LabelE name)
           more
-      AST.BinOp (AST.Iden [AST.Name _ name]) [AST.Name Nothing "."] AST.Star ->
-        ConE 'DotStar `AppE` LabelE name
+      BinOp (Iden [Name _ name]) [Name Nothing "."] Star ->
+        ConE 'S.DotStar `AppE` LabelE name
       _ -> error $ "unsupported selection: " <> show selectionList
 
 
