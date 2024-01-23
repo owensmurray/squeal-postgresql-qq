@@ -47,10 +47,13 @@ library
 test-suite test
   import: dependencies, warnings
   main-is: test.hs
+  other-modules:
+    Squeal.QuasiQuotes
+    Squeal.QuasiQuotes.Query
+    Squeal.QuasiQuotes.RowType
   type: exitcode-stdio-1.0
-  hs-source-dirs: test
+  hs-source-dirs: test, src
   default-language: Haskell2010
   build-depends:
-    , squeal-postgresql-qq
     , hspec >= 2.8.5 && < 2.12
 
