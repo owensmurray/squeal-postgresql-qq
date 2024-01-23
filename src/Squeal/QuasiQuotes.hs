@@ -12,14 +12,16 @@ import Language.Haskell.TH.Quote (QuasiQuoter(QuasiQuoter, quoteDec,
 import Language.Haskell.TH.Syntax (Exp, Q, runIO)
 import Language.SQL.SimpleSQL.Dialect (postgres)
 import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
+import Prelude (Either(Left, Right), Maybe(Nothing), MonadFail(fail),
+  Semigroup((<>)), Show(show), ($), (.), error, print)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
 import Squeal.QuasiQuotes.RowType (Field(Field, unField))
 import qualified Language.SQL.SimpleSQL.Syntax as AST
 
 
-ssql :: QuasiQuoter  
+ssql :: QuasiQuoter
 ssql =
-  QuasiQuoter  
+  QuasiQuoter
     { quoteExp = toSqueal . parseStatement postgres "" Nothing
     , quotePat = error "pattern quotes not supported"
     , quoteType = error "type quotes not supported"
