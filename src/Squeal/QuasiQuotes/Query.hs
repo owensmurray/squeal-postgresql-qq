@@ -65,7 +65,7 @@ renderSelectionList :: [(ScalarExpr, Maybe Name)] -> Exp
 renderSelectionList selectionList =
     case selectionList of
       [(field, alias)] ->
-        renderAlias (renderSelection field) alias
+        renderAlias (renderScalarExpr field) alias
       (field, alias):more ->
         {-
           the order of these arguments to 'Also' seems backwards, but
@@ -75,7 +75,7 @@ renderSelectionList selectionList =
         -}
         ConE 'S.Also
         `AppE` renderSelectionList more
-        `AppE` renderAlias (renderSelection field) alias
+        `AppE` renderAlias (renderScalarExpr field) alias
       [] -> error "Empty selection list not supported."
   where
     renderAlias :: Exp -> Maybe Name -> Exp
@@ -86,18 +86,20 @@ renderSelectionList selectionList =
         `AppE` e
         `AppE` LabelE alias
 
-    renderSelection :: ScalarExpr -> Exp
-    renderSelection = \case
-      Star -> ConE 'S.Star
-      Iden (Name _ name:more) ->
-        foldl'
-          (\acc (Name _ n) ->
-            VarE '(S.!) `AppE` acc `AppE` LabelE n
-          )
-          (LabelE name)
-          more
-      BinOp (Iden [Name _ name]) [Name Nothing "."] Star ->
-        ConE 'S.DotStar `AppE` LabelE name
-      _ -> error $ "unsupported selection: " <> show selectionList
+
+renderScalarExpr :: ScalarExpr -> Exp
+renderScalarExpr = \case
+  Star -> ConE 'S.Star
+  Iden (Name _ name:more) ->
+    foldl'
+      (\acc (Name _ n) ->
+        VarE '(S.!) `AppE` acc `AppE` LabelE n
+      )
+      (LabelE name)
+      more
+  BinOp (Iden [Name _ name]) [Name Nothing "."] Star ->
+    ConE 'S.DotStar `AppE` LabelE name
+  unsupported ->
+    error $ "unsupported: " <> show unsupported
 
 
