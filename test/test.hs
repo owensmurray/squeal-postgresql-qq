@@ -13,12 +13,15 @@ module Main (main) where
 import Data.Text (Text)
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
+import Prelude (($), (.), IO, Maybe, Show, putStrLn)
 import Squeal.PostgreSQL (NullType(NotNull, Null), Optionality(Def,
   NoDef), PGType(PGint4, PGtext, PGuuid), RenderSQL(renderSQL),
   SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), (:::),
   (:=>), Public, Statement)
 import Squeal.QuasiQuotes (Field, ssql)
 import Test.Hspec (describe, hspec, it)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Generics.SOP as SOP
 
 
@@ -65,19 +68,19 @@ main =
                  (Field "bio" (Maybe Text),
                  ()))))
           statement = [ssql| select * from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select user.name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
           statement = [ssql| select users.name from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
           statement = [ssql| select name from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select name, id from users" $ do
         let
@@ -87,7 +90,7 @@ main =
                  (Field "id" Text,
                  ()))
           statement = [ssql| select name, id from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select id, name from users" $ do
         let
@@ -97,7 +100,7 @@ main =
                  (Field "name" Text,
                  ()))
           statement = [ssql| select id, name from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select users.id, employee_id from users" $ do
         let
@@ -107,7 +110,7 @@ main =
                  (Field "employee_id" UUID,
                  ()))
           statement = [ssql| select users.id, employee_id from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select users.* from users" $ do
         let
@@ -119,7 +122,7 @@ main =
                  (Field "bio" (Maybe Text),
                  ()))))
           statement = [ssql| select users.* from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select users.id, employee_id as emp_id from users" $ do
         let
@@ -129,7 +132,7 @@ main =
                  (Field "emp_id" UUID,
                  ()))
           statement = [ssql| select users.id, employee_id as emp_id from users |]
-        print $ renderSQL statement
+        printQuery statement
 
       it "select users.id as user_id, employee_id from users" $ do
         let
@@ -139,6 +142,10 @@ main =
                  (Field "employee_id" UUID,
                  ()))
           statement = [ssql| select users.id as user_id, employee_id from users |]
-        print $ renderSQL statement
+        printQuery statement
+
+
+printQuery :: RenderSQL a => a -> IO ()
+printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL
 
 
