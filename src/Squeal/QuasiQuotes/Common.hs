@@ -9,12 +9,15 @@ module Squeal.QuasiQuotes.Common (
 
 
 import Data.List (foldl')
-import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE))
+import Data.String (IsString(fromString))
+import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, LitE, VarE),
+  Lit(StringL))
 import Language.SQL.SimpleSQL.Syntax (JoinCondition(JoinOn),
-  JoinType(JLeft), Name(Name), ScalarExpr(BinOp, Iden, Star),
-  TableRef(TRJoin, TRSimple))
+  JoinType(JLeft), Name(Name), ScalarExpr(BinOp, Iden, NumLit, Star,
+  StringLit), TableRef(TRJoin, TRSimple))
 import Prelude (Bool(False), Maybe(Just, Nothing), Semigroup((<>)),
   Show(show), ($), error)
+import qualified Data.ByteString.Char8 as BS8
 import qualified Squeal.PostgreSQL as S
 
 
@@ -59,6 +62,14 @@ renderScalarExpr = \case
     VarE '(S..==)
       `AppE` renderScalarExpr left
       `AppE` renderScalarExpr right
+  NumLit num ->
+    ConE 'S.UnsafeExpression
+      `AppE` (
+          VarE 'BS8.pack
+            `AppE` LitE (StringL num)
+        )
+  StringLit _ _ str ->
+    VarE 'fromString `AppE` LitE (StringL str)
   unsupported ->
     error $ "unsupported: " <> show unsupported
 

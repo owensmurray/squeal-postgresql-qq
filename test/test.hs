@@ -162,6 +162,19 @@ main =
             |]
         printQuery statement
 
+    describe "inserts" $ do
+      it "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar')" $ do
+        let
+          statement
+            :: Statement DB () ()
+          statement =
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, 'user-1', 'foo@bar')
+            |]
+        printQuery statement
+
 
 printQuery :: RenderSQL a => a -> IO ()
 printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL
