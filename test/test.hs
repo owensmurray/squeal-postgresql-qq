@@ -36,13 +36,16 @@ type UsersConstraints = '[ "pk_users" ::: 'PrimaryKey '["id"] ]
 type EmailsColumns =
   '[      "id" :::   'Def :=> 'NotNull 'PGint4
    , "user_id" ::: 'NoDef :=> 'NotNull 'PGtext
-   ,   "email" ::: 'NoDef :=> 'Null 'PGtext ]
+   ,   "email" ::: 'NoDef :=> 'Null 'PGtext
+   ]
 type EmailsConstraints =
   '[ "pk_emails"  ::: 'PrimaryKey '["id"]
-   , "fk_user_id" ::: 'ForeignKey '["user_id"] "public" "users" '["id"] ]
+   , "fk_user_id" ::: 'ForeignKey '["user_id"] "public" "users" '["id"]
+   ]
 type Schema =
   '[  "users" ::: 'Table (UsersConstraints :=> UsersColumns)
-   , "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns) ]
+   , "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
+   ]
 type DB = Public Schema
 
 
