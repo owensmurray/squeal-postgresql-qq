@@ -55,7 +55,7 @@ renderScalarExpr = \case
       more
   BinOp left [Name Nothing "."] Star ->
     ConE 'S.DotStar `AppE` renderScalarExpr left
-  (BinOp left [Name Nothing "="] right) ->
+  BinOp left [Name Nothing "="] right ->
     VarE '(S..==)
       `AppE` renderScalarExpr left
       `AppE` renderScalarExpr right
