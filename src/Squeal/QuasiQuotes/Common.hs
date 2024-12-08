@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-| Commonplace renderers shared by other modules. -}
 module Squeal.QuasiQuotes.Common (
@@ -15,9 +16,10 @@ import Language.Haskell.TH.Syntax (Exp(AppE, AppTypeE, ConE, LabelE,
 import Language.SQL.SimpleSQL.Syntax (JoinCondition(JoinOn),
   JoinType(JLeft), Name(Name), ScalarExpr(BinOp, Iden, NumLit,
   PositionalArg, Star, StringLit), TableRef(TRJoin, TRSimple))
-import Prelude (Bool(False), Integral(toInteger), Maybe(Just, Nothing),
-  Semigroup((<>)), Show(show), ($), error)
+import Prelude (Bool(False), Functor(fmap), Integral(toInteger),
+  Maybe(Just, Nothing), Semigroup((<>)), Show(show), ($), error)
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Char as Char
 import qualified Squeal.PostgreSQL as S
 
 
@@ -49,6 +51,8 @@ renderTableRef = \case
 renderScalarExpr :: ScalarExpr -> Exp
 renderScalarExpr = \case
   Star -> ConE 'S.Star
+  Iden [Name Nothing (fmap Char.toLower -> "null")] ->
+    VarE 'S.null_
   Iden (Name _ name:more) ->
     foldl'
       (\acc (Name _ n) ->

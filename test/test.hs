@@ -249,6 +249,49 @@ main =
                   values (DEFAULT, 'foo', 'bar')
               |]
           printQuery statement
+      describe "null keyword" $ do
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', null)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', null)
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', NULL)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', NULL)
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', NuLL)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', NuLL)
+              |]
+          printQuery statement
 
 
 printQuery :: RenderSQL a => a -> IO ()
