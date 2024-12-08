@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
-
+{-# LANGUAGE ViewPatterns #-}
 
 {-| Description: Translate insert statements.  -}
 module Squeal.QuasiQuotes.Insert (
@@ -11,10 +12,11 @@ module Squeal.QuasiQuotes.Insert (
 import Data.List (foldl')
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, ListE, VarE))
 import Language.SQL.SimpleSQL.Syntax (InsertSource(InsertQuery),
-  Name(Name), QueryExpr(Values), Statement(Insert), ScalarExpr)
-import Prelude (Maybe(Just, Nothing), Semigroup((<>)), Show(show), ($),
-  (<$>), error)
+  Name(Name), QueryExpr(Values), ScalarExpr(Iden), Statement(Insert))
+import Prelude (Functor(fmap), Maybe(Just, Nothing), Semigroup((<>)),
+  Show(show), ($), (<$>), error)
 import Squeal.QuasiQuotes.Common (renderScalarExpr)
+import qualified Data.Char as Char
 import qualified Squeal.PostgreSQL as S
 
 
@@ -29,8 +31,8 @@ toSquealInsert into fields values =
       case (fields, values) of
         (Just names, InsertQuery (Values vals)) ->
             VarE 'S.insertInto_
-              `AppE` renderQualifiedName into
-              `AppE` renderValueRows names vals
+              `AppE` renderQualifiedName into {- The table name -}
+              `AppE` renderValueRows names vals {- The values -}
         _ ->
           error $ "Unspported: " <> show (Insert into fields values)
     )
@@ -67,6 +69,18 @@ toSquealInsert into fields values =
     renderValueRow =
       \cases
         [] [] -> ConE 'S.Nil
+        ((Name Nothing name):names)
+            (Iden [Name Nothing (fmap Char.toLower -> "default")]:vals)
+          ->
+            ConE '(S.:*)
+            `AppE`
+              (
+                VarE 'S.as
+                  `AppE` ConE 'S.Default
+                  `AppE` LabelE name
+              )
+            `AppE`
+              renderValueRow names vals
         ((Name Nothing name):names) (val:vals) ->
           ConE '(S.:*)
           `AppE`

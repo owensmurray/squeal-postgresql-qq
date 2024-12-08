@@ -206,6 +206,49 @@ main =
                 values (1, $2, $1)
             |]
         printQuery statement
+      describe "default keyword" $ do
+        it "insert into emails (id, user_id, email) values (default, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (default, 'foo', 'bar')
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (deFault, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (deFault, 'foo', 'bar')
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', 'bar')
+              |]
+          printQuery statement
 
 
 printQuery :: RenderSQL a => a -> IO ()
