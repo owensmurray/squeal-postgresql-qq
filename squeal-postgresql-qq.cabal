@@ -35,6 +35,7 @@ common warnings
 
 common other-modules
   other-modules:
+    Squeal.QuasiQuotes.Common
     Squeal.QuasiQuotes.Query
     Squeal.QuasiQuotes.RowType
 

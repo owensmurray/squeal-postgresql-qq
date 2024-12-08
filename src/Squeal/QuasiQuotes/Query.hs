@@ -7,15 +7,13 @@ module Squeal.QuasiQuotes.Query (
   toSquealQuery,
 ) where
 
-import Data.List (foldl')
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
-import Language.SQL.SimpleSQL.Syntax (JoinCondition(JoinOn),
-  JoinType(JLeft), Name(Name), QueryExpr(Select, qeFrom, qeGroupBy,
-  qeHaving, qeOffset, qeOrderBy, qeSelectList, qeSetQuantifier,
-  qeWhere), ScalarExpr(BinOp, Iden, Star), SetQuantifier(SQDefault),
-  TableRef(TRJoin, TRSimple))
-import Prelude (Applicative(pure), Bool(False), Maybe(Just, Nothing),
-  MonadFail(fail), Semigroup((<>)), Show(show), ($), error)
+import Language.SQL.SimpleSQL.Syntax (Name(Name), QueryExpr(Select,
+  qeFrom, qeGroupBy, qeHaving, qeOffset, qeOrderBy, qeSelectList,
+  qeSetQuantifier, qeWhere), SetQuantifier(SQDefault), ScalarExpr)
+import Prelude (Applicative(pure), Maybe(Just, Nothing), MonadFail(fail),
+  Semigroup((<>)), Show(show), ($), error)
+import Squeal.QuasiQuotes.Common (renderScalarExpr, renderTableRef)
 import Squeal.QuasiQuotes.RowType (monoQuery)
 import qualified Squeal.PostgreSQL as S
 
@@ -54,31 +52,6 @@ toSquealQuery = \case
     fail $ "Unsupported: " <> show unsupported
 
 
-renderTableRef :: TableRef -> Exp
-renderTableRef = \case
-    TRSimple [Name Nothing theTable] ->
-      VarE 'S.table
-      `AppE`
-        (
-          VarE 'S.as
-          `AppE` LabelE theTable
-          `AppE` LabelE theTable
-        )
-    TRJoin left False JLeft right (Just condition) ->
-      VarE 'S.leftOuterJoin
-      `AppE` renderTableRef right
-      `AppE` renderJoinCondition condition
-      `AppE` renderTableRef left
-    unsupported ->
-      error $ "Unsupported: " <> show unsupported
-  where
-    renderJoinCondition = \case
-      (JoinOn expr) ->
-        renderScalarExpr expr
-      unsupported ->
-        error $ "Unsupported: " <> show unsupported
-
-
 renderSelectionList :: [(ScalarExpr, Maybe Name)] -> Exp
 renderSelectionList selectionList =
     case selectionList of
@@ -103,25 +76,5 @@ renderSelectionList selectionList =
         VarE 'S.as
         `AppE` e
         `AppE` LabelE alias
-
-
-renderScalarExpr :: ScalarExpr -> Exp
-renderScalarExpr = \case
-  Star -> ConE 'S.Star
-  Iden (Name _ name:more) ->
-    foldl'
-      (\acc (Name _ n) ->
-        VarE '(S.!) `AppE` acc `AppE` LabelE n
-      )
-      (LabelE name)
-      more
-  BinOp left [Name Nothing "."] Star ->
-    ConE 'S.DotStar `AppE` renderScalarExpr left
-  (BinOp left [Name Nothing "="] right) ->
-    VarE '(S..==)
-      `AppE` renderScalarExpr left
-      `AppE` renderScalarExpr right
-  unsupported ->
-    error $ "unsupported: " <> show unsupported
 
 
