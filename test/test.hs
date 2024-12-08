@@ -17,7 +17,7 @@ import Prelude (($), (.), IO, Maybe, Show, putStrLn)
 import Squeal.PostgreSQL (NullType(NotNull, Null), Optionality(Def,
   NoDef), PGType(PGint4, PGtext, PGuuid), RenderSQL(renderSQL),
   SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), (:::),
-  (:=>), Public, Statement)
+  (:=>), Only, Public, Statement)
 import Squeal.QuasiQuotes (Field, ssql)
 import Test.Hspec (describe, hspec, it)
 import qualified Data.Text as T
@@ -172,6 +172,38 @@ main =
               insert into
                 emails (id, user_id, email)
                 values (1, 'user-1', 'foo@bar')
+            |]
+        printQuery statement
+      it "insert into emails (id, user_id, email) values (1, 'user-1', $1)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Only (Maybe Text))
+                 ()
+          statement =
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, 'user-1', $1)
+            |]
+        printQuery statement
+      it "insert into emails (id, user_id, email) values (1, $2, $1)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Maybe Text, Text)
+                 ()
+          statement =
+            {-
+              Note the parameters are backwards (i.e. $2 comes before $1),
+              to test that you can do this kind of thing out of order.
+            -}
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, $2, $1)
             |]
         printQuery statement
 

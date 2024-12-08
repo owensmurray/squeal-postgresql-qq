@@ -10,13 +10,13 @@ module Squeal.QuasiQuotes.Common (
 
 import Data.List (foldl')
 import Data.String (IsString(fromString))
-import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, LitE, VarE),
-  Lit(StringL))
+import Language.Haskell.TH.Syntax (Exp(AppE, AppTypeE, ConE, LabelE,
+  LitE, VarE), Lit(StringL), TyLit(NumTyLit), Type(LitT))
 import Language.SQL.SimpleSQL.Syntax (JoinCondition(JoinOn),
-  JoinType(JLeft), Name(Name), ScalarExpr(BinOp, Iden, NumLit, Star,
-  StringLit), TableRef(TRJoin, TRSimple))
-import Prelude (Bool(False), Maybe(Just, Nothing), Semigroup((<>)),
-  Show(show), ($), error)
+  JoinType(JLeft), Name(Name), ScalarExpr(BinOp, Iden, NumLit,
+  PositionalArg, Star, StringLit), TableRef(TRJoin, TRSimple))
+import Prelude (Bool(False), Integral(toInteger), Maybe(Just, Nothing),
+  Semigroup((<>)), Show(show), ($), error)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Squeal.PostgreSQL as S
 
@@ -70,6 +70,9 @@ renderScalarExpr = \case
         )
   StringLit _ _ str ->
     VarE 'fromString `AppE` LitE (StringL str)
+  PositionalArg n ->
+    VarE 'S.param
+      `AppTypeE` LitT (NumTyLit (toInteger n))
   unsupported ->
     error $ "unsupported: " <> show unsupported
 
