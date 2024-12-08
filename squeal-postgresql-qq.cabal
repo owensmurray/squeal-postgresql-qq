@@ -17,11 +17,11 @@ extra-source-files:
 
 common dependencies
   build-depends:
-    , base              >= 4.19.0.0 && < 4.20
+    , base              >= 4.19.0.0 && < 4.21
     , generics-sop      >= 0.5.1.4  && < 0.6
     , simple-sql-parser >= 0.6.0    && < 0.7
     , squeal-postgresql >= 0.9.1.3  && < 0.10
-    , template-haskell  >= 2.21.0.0 && < 2.22
+    , template-haskell  >= 2.21.0.0 && < 2.23
     , text              >= 2.1      && < 2.2
     , uuid              >= 1.3.15   && < 1.4
 
