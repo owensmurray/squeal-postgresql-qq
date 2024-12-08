@@ -43,7 +43,9 @@ import qualified Squeal.PostgreSQL as Squeal
   > (Field name1 type1,
   > (Field name2 type2,
   > (Field name3 type3,
-  > (<continue nesting>)))
+  > <continue nesting>,
+  > ()))...)
+
 
   where the "name<N>" are phantom types of kind `Symbol`, which provide
   the name of the corresponding column, and types "type<N>" are whatever
