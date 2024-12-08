@@ -10,15 +10,15 @@
 {- |
   Description: Monomorphic squeal row types.
 
-  This module creates a type family that converts (via a type family)
-  a squeal row type into a specific, monomorphic tuple representation
-  meant to be consumed by the user. The purpose of this so that the squeal
-  quasiquoter won't produce polymorphic types, though it will produce
-  a *different* monomorphic type depending on the columns returned by
-  the query. The reason we want that is to help type inference as much
-  as possible. Squeal already has some problems with type inference,
-  and burden on the user of navigating them is only likely to increase
-  when a lot of the squeal "code" itself is hidden behind a quasiquoter.
+  This module provides a type family that converts a squeal row type into
+  a specific, monomorphic tuple representation meant to be consumed by the
+  user. The purpose of this so that the squeal quasiquoter won't produce
+  polymorphic types, though it will produce a *different* monomorphic
+  type depending on the columns returned by the query. The reason we want
+  this is to help type inference as much as possible. Squeal already
+  has some problems with type inference, and the burden on the user of
+  navigating them is only likely to increase when a lot of the squeal
+  "code" itself is hidden behind a quasiquoter.
 -}
 module Squeal.QuasiQuotes.RowType (
   RowType,
@@ -43,7 +43,9 @@ import qualified Squeal.PostgreSQL as Squeal
   > (Field name1 type1,
   > (Field name2 type2,
   > (Field name3 type3,
-  > (<continue nesting>)))
+  > <continue nesting>,
+  > ()))...)
+
 
   where the "name<N>" are phantom types of kind `Symbol`, which provide
   the name of the corresponding column, and types "type<N>" are whatever

@@ -16,8 +16,9 @@ import Language.Haskell.TH.Quote (QuasiQuoter(QuasiQuoter, quoteDec,
 import Language.Haskell.TH.Syntax (Exp, Q, runIO)
 import Language.SQL.SimpleSQL.Dialect (postgres)
 import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
-import Prelude (Either(Left, Right), Maybe(Nothing), MonadFail(fail),
-  Semigroup((<>)), Show(show), ($), (.), error, print)
+import Prelude (Applicative(pure), Either(Left, Right), Maybe(Nothing),
+  MonadFail(fail), Semigroup((<>)), Show(show), ($), (.), error, print)
+import Squeal.QuasiQuotes.Insert (toSquealInsert)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
 import Squeal.QuasiQuotes.RowType (Field(Field, unField))
 import qualified Language.SQL.SimpleSQL.Syntax as AST
@@ -44,6 +45,8 @@ toSqueal = \case
 toSquealStatement :: AST.Statement -> Q Exp
 toSquealStatement = \case
   AST.SelectStatement theQuery -> toSquealQuery theQuery
+  AST.Insert into fields values ->
+    pure $ toSquealInsert into fields values
   unsupported ->
     error $ "Unsupported: " <> show unsupported
 

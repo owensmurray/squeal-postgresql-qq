@@ -10,3 +10,6 @@ allow-newer:
   , simple-sql-parser:mtl
 
 
+constraints:
+  postgresql-binary == 0.13.1.3
+

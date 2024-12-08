@@ -17,7 +17,7 @@ import Prelude (($), (.), IO, Maybe, Show, putStrLn)
 import Squeal.PostgreSQL (NullType(NotNull, Null), Optionality(Def,
   NoDef), PGType(PGint4, PGtext, PGuuid), RenderSQL(renderSQL),
   SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), (:::),
-  (:=>), Public, Statement)
+  (:=>), Only, Public, Statement)
 import Squeal.QuasiQuotes (Field, ssql)
 import Test.Hspec (describe, hspec, it)
 import qualified Data.Text as T
@@ -36,13 +36,16 @@ type UsersConstraints = '[ "pk_users" ::: 'PrimaryKey '["id"] ]
 type EmailsColumns =
   '[      "id" :::   'Def :=> 'NotNull 'PGint4
    , "user_id" ::: 'NoDef :=> 'NotNull 'PGtext
-   ,   "email" ::: 'NoDef :=> 'Null 'PGtext ]
+   ,   "email" ::: 'NoDef :=> 'Null 'PGtext
+   ]
 type EmailsConstraints =
   '[ "pk_emails"  ::: 'PrimaryKey '["id"]
-   , "fk_user_id" ::: 'ForeignKey '["user_id"] "public" "users" '["id"] ]
+   , "fk_user_id" ::: 'ForeignKey '["user_id"] "public" "users" '["id"]
+   ]
 type Schema =
   '[  "users" ::: 'Table (UsersConstraints :=> UsersColumns)
-   , "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns) ]
+   , "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
+   ]
 type DB = Public Schema
 
 
@@ -158,6 +161,137 @@ main =
               on emails.user_id = users.id
             |]
         printQuery statement
+
+    describe "inserts" $ do
+      it "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar')" $ do
+        let
+          statement
+            :: Statement DB () ()
+          statement =
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, 'user-1', 'foo@bar')
+            |]
+        printQuery statement
+      it "insert into emails (id, user_id, email) values (1, 'user-1', $1)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Only (Maybe Text))
+                 ()
+          statement =
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, 'user-1', $1)
+            |]
+        printQuery statement
+      it "insert into emails (id, user_id, email) values (1, $2, $1)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Maybe Text, Text)
+                 ()
+          statement =
+            {-
+              Note the parameters are backwards (i.e. $2 comes before $1),
+              to test that you can do this kind of thing out of order.
+            -}
+            [ssql|
+              insert into
+                emails (id, user_id, email)
+                values (1, $2, $1)
+            |]
+        printQuery statement
+      describe "default keyword" $ do
+        it "insert into emails (id, user_id, email) values (default, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (default, 'foo', 'bar')
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (deFault, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (deFault, 'foo', 'bar')
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', 'bar')" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', 'bar')
+              |]
+          printQuery statement
+      describe "null keyword" $ do
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', null)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', null)
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', NULL)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', NULL)
+              |]
+          printQuery statement
+        it "insert into emails (id, user_id, email) values (DEFAULT, 'foo', NuLL)" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   (Maybe Text, Text)
+                   ()
+            statement =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (DEFAULT, 'foo', NuLL)
+              |]
+          printQuery statement
 
 
 printQuery :: RenderSQL a => a -> IO ()
