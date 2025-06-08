@@ -10,7 +10,8 @@ jobs:
         ghc-version:
           - '9.8'
           - '9.10'
-        cabal-version: ['3.12.1.0']
+          - '9.12'
+        cabal-version: ['3.14.2.0']
     steps:
       # Checkout
       - uses: actions/checkout@v3
