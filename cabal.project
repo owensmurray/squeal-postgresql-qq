@@ -7,7 +7,6 @@ package squeal-postgresql-qq
 allow-newer:
   records-sop:ghc-prim
   , records-sop:deepseq
-  , simple-sql-parser:mtl
 
 
 constraints:
