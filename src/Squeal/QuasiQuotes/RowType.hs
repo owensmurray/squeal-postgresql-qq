@@ -5,7 +5,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- |
   Description: Monomorphic squeal row types.
@@ -23,16 +25,20 @@
 module Squeal.QuasiQuotes.RowType (
   RowType,
   monoQuery,
-  Field(..),
+  Field (..),
 ) where
 
-import Data.Kind (Type)
+import Data.Int (Int32, Int64)
 import Data.Text (Text)
+import Data.Time (Day, UTCTime)
 import Data.UUID (UUID)
-import GHC.OverloadedLabels (fromLabel)
 import GHC.TypeLits (Symbol)
 import Generics.SOP (SListI)
-import Squeal.PostgreSQL (NullType(NotNull, Null), (:::))
+import Prelude (Applicative(pure), (<$>), Bool, Maybe)
+import Squeal.PostgreSQL
+  ( FromValue(fromValue), IsLabel(fromLabel), NullType(NotNull, Null)
+  , PGType(PGbool, PGdate, PGint4, PGint8, PGtext, PGtimestamptz, PGuuid), (:::)
+  )
 import qualified Squeal.PostgreSQL as Squeal
 
 
@@ -46,33 +52,55 @@ import qualified Squeal.PostgreSQL as Squeal
   > <continue nesting>,
   > ()))...)
 
-
   where the "name<N>" are phantom types of kind `Symbol`, which provide
   the name of the corresponding column, and types "type<N>" are whatever
   appropriate haskell type represents the postgres column type.
 -}
-type family RowType a where
-  RowType (fld ::: 'NotNull typ ': more) =
-    (Field fld (UnPG typ), RowType more)
-  RowType (fld ::: 'Null typ ': more) =
-    (Field fld (Maybe (UnPG typ)), RowType more)
+type family RowType a = b | b -> a where
+  {-
+    It would be more convenient to use a helper type family here that
+    would map PGtypes to Haskell types. But if we did that, we would
+    not be able to make this type family injective.
+
+    This is Because GHC would not be able to tell that the right-hand
+    side of this type family did not overlap even if that the helper
+    type family were itself injective. Injectivity of the helper is not
+    enough. The specific helper definition must happen to not produce
+    instances that overlap with any Maybe type when used here.
+
+    For instance, this example helper type family is injective, but when
+    used here it would produce overlapping values for the `NotNull PGint4`
+    and `Null PGbool` equations.
+
+    type family Helper x = a | a -> x where
+      Helper Int32 = Maybe Bool
+      Helper Bool = Bool
+
+  -}
+  RowType (fld ::: 'NotNull PGbool ': more) = (Field fld Bool, RowType more)
+  RowType (fld ::: 'NotNull PGint4 ': more) = (Field fld Int32, RowType more)
+  RowType (fld ::: 'NotNull PGint8 ': more) = (Field fld Int64, RowType more)
+  RowType (fld ::: 'NotNull PGtext ': more) = (Field fld Text, RowType more)
+  RowType (fld ::: 'NotNull PGuuid ': more) = (Field fld UUID, RowType more)
+  RowType (fld ::: 'NotNull PGtimestamptz ': more) =
+    (Field fld UTCTime, RowType more)
+  RowType (fld ::: 'NotNull PGdate ': more) = (Field fld Day, RowType more)
+  RowType (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), RowType more)
+  RowType (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), RowType more)
+  RowType (fld ::: 'Null PGint8 ': more) = (Field fld (Maybe Int64), RowType more)
+  RowType (fld ::: 'Null PGtext ': more) = (Field fld (Maybe Text), RowType more)
+  RowType (fld ::: 'Null PGuuid ': more) = (Field fld (Maybe UUID), RowType more)
+  RowType (fld ::: 'Null PGtimestamptz ': more) =
+    (Field fld (Maybe UTCTime), RowType more)
+  RowType (fld ::: 'Null PGdate ': more) = (Field fld (Maybe Day), RowType more)
   RowType '[] = ()
-
-
-{- | Converts PGTypes to Haskell types. This is the inverse of 'Squeal.PG'. -}
-type family UnPG (a :: Squeal.PGType) :: Type where
-  UnPG 'Squeal.PGbool = Bool
-  UnPG 'Squeal.PGtext = Text
-  UnPG 'Squeal.PGuuid = UUID
-  {- Not complete ...  -}
 
 
 newtype Field (name :: Symbol) a = Field
   { unField :: a
   }
 instance
-    ( Squeal.FromValue pg hask
-    )
+    (Squeal.FromValue pg hask)
   =>
     Squeal.FromValue pg (Field name hask)
   where
@@ -103,7 +131,7 @@ instance
     , Squeal.FromValue typ t
     )
   =>
-    HasRowDecoder ((fld ::: typ) ': moreRow)  (Field fld t, moreFields)
+    HasRowDecoder ((fld ::: typ) ': moreRow) (Field fld t, moreFields)
   where
     getRowDecoder =
       Squeal.consRow

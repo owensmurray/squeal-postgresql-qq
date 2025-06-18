@@ -1,53 +1,56 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-{-|
+{- |
   Description: quasiquoter understanding SQL and producing
   `squeal-postgresql` expressions.
 -}
 module Squeal.QuasiQuotes (
   ssql,
-  Field(..),
+  Field (..),
 ) where
 
-
-import Language.Haskell.TH.Quote (QuasiQuoter(QuasiQuoter, quoteDec,
-  quoteExp, quotePat, quoteType))
+import Language.Haskell.TH.Quote
+  ( QuasiQuoter(QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType)
+  )
 import Language.Haskell.TH.Syntax (Exp, Q, runIO)
-import Language.SQL.SimpleSQL.Dialect (postgres)
-import Language.SQL.SimpleSQL.Parse (ParseError, parseStatement)
-import Prelude (Applicative(pure), Either(Left, Right), Maybe(Nothing),
-  MonadFail(fail), Semigroup((<>)), Show(show), ($), (.), error, print)
+import Prelude
+  ( Either(Left, Right), MonadFail(fail), Semigroup((<>)), Show(show), ($), (.)
+  , String, error, print
+  )
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
 import Squeal.QuasiQuotes.RowType (Field(Field, unField))
-import qualified Language.SQL.SimpleSQL.Syntax as AST
+import qualified Data.Text as Text
+import qualified PostgresqlSyntax.Ast as PGT_AST
+import qualified PostgresqlSyntax.Parsing as PGT_Parse
 
 
 ssql :: QuasiQuoter
 ssql =
   QuasiQuoter
-    { quoteExp = toSqueal . parseStatement postgres "" Nothing
+    { quoteExp =
+        toSqueal . PGT_Parse.run PGT_Parse.preparableStmt . Text.strip . Text.pack
     , quotePat = error "pattern quotes not supported"
     , quoteType = error "type quotes not supported"
     , quoteDec = error "declaration quotes not supported"
     }
 
 
-toSqueal :: Either ParseError AST.Statement -> Q Exp
+toSqueal :: Either String PGT_AST.PreparableStmt -> Q Exp
 toSqueal = \case
-  Left err -> fail (show err)
+  Left err -> fail err
   Right statement -> do
     runIO (print statement)
     toSquealStatement statement
 
 
-toSquealStatement :: AST.Statement -> Q Exp
+toSquealStatement :: PGT_AST.PreparableStmt -> Q Exp
 toSquealStatement = \case
-  AST.SelectStatement theQuery -> toSquealQuery theQuery
-  AST.Insert into fields values ->
-    pure $ toSquealInsert into fields values
+  PGT_AST.SelectPreparableStmt theQuery -> toSquealQuery theQuery
+  PGT_AST.InsertPreparableStmt stmt -> toSquealInsert stmt
   unsupported ->
-    error $ "Unsupported: " <> show unsupported
+    error $ "Unsupported statement: " <> show unsupported
 
 
