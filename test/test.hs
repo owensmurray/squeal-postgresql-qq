@@ -24,9 +24,9 @@ import Prelude
   )
 import Squeal.PostgreSQL
   ( NullType(NotNull, Null), Optionality(Def, NoDef)
-  , PGType(PGint4, PGjsonb, PGtext, PGuuid), RenderSQL(renderSQL)
+  , PGType(PGint4, PGjson, PGjsonb, PGtext, PGuuid), RenderSQL(renderSQL)
   , SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), (:::), (:=>)
-  , Jsonb, Only, Statement
+  , Json, Jsonb, Only, Statement
   )
 import Squeal.QuasiQuotes (Field, ssql)
 import Test.Hspec (describe, hspec, it)
@@ -59,6 +59,7 @@ type Schema =
   '[      "users" ::: 'Table (UsersConstraints :=> UsersColumns)
    ,     "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
    , "jsonb_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjsonb])
+   ,  "json_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjson])
    ]
 type DB =
   '[ "public" ::: Schema
@@ -1018,6 +1019,20 @@ main =
           statement = [ssql| select * from jsonb_test |]
           squealRendering :: Text
           squealRendering = "SELECT * FROM \"jsonb_test\" AS \"jsonb_test\""
+        checkStatement squealRendering statement
+
+      it "select * from json_test" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "data" (Json Value)
+                 , ()
+                 )
+          statement = [ssql| select * from json_test |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"json_test\" AS \"json_test\""
         checkStatement squealRendering statement
 
 

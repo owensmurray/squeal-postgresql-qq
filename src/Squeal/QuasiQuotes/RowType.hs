@@ -38,8 +38,8 @@ import Generics.SOP (SListI)
 import Prelude (Applicative(pure), (<$>), Bool, Maybe)
 import Squeal.PostgreSQL
   ( FromValue(fromValue), IsLabel(fromLabel), NullType(NotNull, Null)
-  , PGType(PGbool, PGdate, PGint4, PGint8, PGjsonb, PGtext, PGtimestamptz, PGuuid)
-  , (:::), Jsonb
+  , PGType(PGbool, PGdate, PGint4, PGint8, PGjson, PGjsonb, PGtext, PGtimestamptz, PGuuid)
+  , (:::), Json, Jsonb
   )
 import qualified Squeal.PostgreSQL as Squeal
 
@@ -89,6 +89,7 @@ type family RowType a = b | b -> a where
   RowType (fld ::: 'NotNull PGdate ': more) = (Field fld Day, RowType more)
   RowType (fld ::: 'NotNull PGtimestamptz ': more) = (Field fld UTCTime, RowType more)
   RowType (fld ::: 'NotNull PGjsonb ': more) = (Field fld (Jsonb Value), RowType more)
+  RowType (fld ::: 'NotNull PGjson ': more) = (Field fld (Json Value), RowType more)
 
   RowType (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), RowType more)
   RowType (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), RowType more)
@@ -98,6 +99,7 @@ type family RowType a = b | b -> a where
   RowType (fld ::: 'Null PGdate ': more) = (Field fld (Maybe Day), RowType more)
   RowType (fld ::: 'Null PGtimestamptz ': more) = (Field fld (Maybe UTCTime), RowType more)
   RowType (fld ::: 'Null PGjsonb ': more) = (Field fld (Maybe (Jsonb Value)), RowType more)
+  RowType (fld ::: 'Null PGjson ': more) = (Field fld (Maybe (Json Value)), RowType more)
   RowType '[] = ()
 {- FOURMOLU_ENABLE -}
 
