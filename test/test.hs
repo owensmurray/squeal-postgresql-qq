@@ -12,6 +12,7 @@
 
 module Main (main) where
 
+import Data.Aeson (Value)
 import Data.Int (Int32, Int64)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
@@ -23,8 +24,9 @@ import Prelude
   )
 import Squeal.PostgreSQL
   ( NullType(NotNull, Null), Optionality(Def, NoDef)
-  , PGType(PGint4, PGtext, PGuuid), RenderSQL(renderSQL), SchemumType(Table)
-  , TableConstraint(ForeignKey, PrimaryKey), (:::), (:=>), Only, Statement
+  , PGType(PGint4, PGjsonb, PGtext, PGuuid), RenderSQL(renderSQL)
+  , SchemumType(Table), TableConstraint(ForeignKey, PrimaryKey), (:::), (:=>)
+  , Jsonb, Only, Statement
   )
 import Squeal.QuasiQuotes (Field, ssql)
 import Test.Hspec (describe, hspec, it)
@@ -54,8 +56,9 @@ type EmailsConstraints =
    , "fk_user_id" ::: 'ForeignKey '["user_id"] "public" "users" '["id"]
    ]
 type Schema =
-  '[  "users" ::: 'Table (UsersConstraints :=> UsersColumns)
-   , "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
+  '[      "users" ::: 'Table (UsersConstraints :=> UsersColumns)
+   ,     "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
+   , "jsonb_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjsonb])
    ]
 type DB =
   '[ "public" ::: Schema
@@ -1001,6 +1004,20 @@ main =
           statement = [ssql| select * from users for update |]
           squealRendering :: Text
           squealRendering = "SELECT * FROM \"users\" AS \"users\" FOR UPDATE"
+        checkStatement squealRendering statement
+
+      it "select * from jsonb_test" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "data" (Jsonb Value)
+                 , ()
+                 )
+          statement = [ssql| select * from jsonb_test |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"jsonb_test\" AS \"jsonb_test\""
         checkStatement squealRendering statement
 
 
