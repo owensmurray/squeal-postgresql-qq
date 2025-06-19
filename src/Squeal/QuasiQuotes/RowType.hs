@@ -42,6 +42,9 @@ import Squeal.PostgreSQL
 import qualified Squeal.PostgreSQL as Squeal
 
 
+
+
+{- FOURMOLU_DISABLE -}
 {- |
   Given an Squeal row specification, produce a corresponding haskell
   tuple type of the form:
@@ -75,25 +78,24 @@ type family RowType a = b | b -> a where
     type family Helper x = a | a -> x where
       Helper Int32 = Maybe Bool
       Helper Bool = Bool
-
   -}
   RowType (fld ::: 'NotNull PGbool ': more) = (Field fld Bool, RowType more)
   RowType (fld ::: 'NotNull PGint4 ': more) = (Field fld Int32, RowType more)
   RowType (fld ::: 'NotNull PGint8 ': more) = (Field fld Int64, RowType more)
   RowType (fld ::: 'NotNull PGtext ': more) = (Field fld Text, RowType more)
   RowType (fld ::: 'NotNull PGuuid ': more) = (Field fld UUID, RowType more)
-  RowType (fld ::: 'NotNull PGtimestamptz ': more) =
-    (Field fld UTCTime, RowType more)
   RowType (fld ::: 'NotNull PGdate ': more) = (Field fld Day, RowType more)
+  RowType (fld ::: 'NotNull PGtimestamptz ': more) = (Field fld UTCTime, RowType more)
+
   RowType (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), RowType more)
   RowType (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), RowType more)
   RowType (fld ::: 'Null PGint8 ': more) = (Field fld (Maybe Int64), RowType more)
   RowType (fld ::: 'Null PGtext ': more) = (Field fld (Maybe Text), RowType more)
   RowType (fld ::: 'Null PGuuid ': more) = (Field fld (Maybe UUID), RowType more)
-  RowType (fld ::: 'Null PGtimestamptz ': more) =
-    (Field fld (Maybe UTCTime), RowType more)
   RowType (fld ::: 'Null PGdate ': more) = (Field fld (Maybe Day), RowType more)
+  RowType (fld ::: 'Null PGtimestamptz ': more) = (Field fld (Maybe UTCTime), RowType more)
   RowType '[] = ()
+{- FOURMOLU_ENABLE -}
 
 
 newtype Field (name :: Symbol) a = Field
