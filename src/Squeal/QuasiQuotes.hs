@@ -23,7 +23,10 @@ import Prelude
 import Squeal.QuasiQuotes.Delete (toSquealDelete)
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
-import Squeal.QuasiQuotes.RowType (Field(Field, unField), monoQuery)
+import Squeal.QuasiQuotes.RowType
+  ( Field(Field, unField), monoManipulation, monoQuery
+  )
+import Squeal.QuasiQuotes.Update (toSquealUpdate)
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
 import qualified PostgresqlSyntax.Parsing as PGT_Parse
@@ -54,6 +57,9 @@ toSquealStatement = \case
     queryExp <- toSquealQuery theQuery
     pure $ VarE 'monoQuery `AppE` queryExp
   PGT_AST.InsertPreparableStmt stmt -> toSquealInsert stmt
+  PGT_AST.UpdatePreparableStmt stmt -> do
+    manipExp <- toSquealUpdate stmt
+    pure $ VarE 'monoManipulation `AppE` manipExp
   PGT_AST.DeletePreparableStmt stmt -> toSquealDelete stmt
   unsupported ->
     error $ "Unsupported statement: " <> show unsupported

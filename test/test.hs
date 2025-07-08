@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -760,6 +761,47 @@ main =
           squealRendering :: Text
           squealRendering =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"email\" = (E'foo' :: text))"
+        checkStatement squealRendering statement
+
+    describe "updates" $ do
+      it "update users set name = 'new name' where id = 'some-id'" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| update users set name = 'new name' where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = 'new name', bio = 'new bio' where id = 'some-id'" $ do
+        let
+          statement :: Statement DB () ()
+          statement =
+            [ssql| update users set name = 'new name', bio = 'new bio' where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text), \"bio\" = (E'new bio' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = haskell(n) where id = 'some-id'" $ do
+        let
+          n :: Text
+          n = "new name"
+          statement :: Statement DB () ()
+          statement = [ssql| update users set name = haskell(n) where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = 'new name' where id = 'some-id' returning id" $ do
+        let
+          statement :: Statement DB () (Field "id" Text, ())
+          statement =
+            [ssql| update users set name = 'new name' where id = 'some-id' returning id |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
 
     describe "scalar expressions" $ do
