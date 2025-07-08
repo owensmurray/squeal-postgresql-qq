@@ -532,6 +532,31 @@ renderPGTLimitClause = \case
 renderPGTOffsetClause :: PGT_AST.OffsetClause -> Q Exp
 renderPGTOffsetClause = \case
   PGT_AST.ExprOffsetClause
+    ( PGT_AST.CExprAExpr
+        ( PGT_AST.FuncCExpr
+            ( PGT_AST.ApplicationFuncExpr
+                ( PGT_AST.FuncApplication
+                    (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                    ( Just
+                        ( PGT_AST.NormalFuncApplicationParams
+                            Nothing
+                            ( PGT_AST.ExprFuncArgExpr
+                                ( PGT_AST.CExprAExpr
+                                    (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
+                                  )
+                                NE.:| []
+                              )
+                            Nothing
+                          )
+                      )
+                  )
+                Nothing
+                Nothing
+                Nothing
+              )
+          )
+      ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
+  PGT_AST.ExprOffsetClause
     (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
       if n >= 0
         then pure (LitE (IntegerL (fromIntegral n)))

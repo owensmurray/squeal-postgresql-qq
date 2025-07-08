@@ -322,6 +322,34 @@ main =
         checkStatement squealRendering1 (mkStatement 10)
         checkStatement squealRendering2 (mkStatement 20)
 
+      it "select * from users offset haskell(off)" $ do
+        let
+          mkStatement
+            :: Word64
+            -> Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          mkStatement off =
+            [ssql| select * from users offset haskell(off) |]
+
+          squealRendering1 :: Text
+          squealRendering1 = "SELECT * FROM \"users\" AS \"users\" OFFSET 5"
+
+          squealRendering2 :: Text
+          squealRendering2 = "SELECT * FROM \"users\" AS \"users\" OFFSET 15"
+
+        checkStatement squealRendering1 (mkStatement 5)
+        checkStatement squealRendering2 (mkStatement 15)
+
       it "select * from users offset 1" $ do
         let
           statement
