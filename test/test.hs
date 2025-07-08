@@ -17,6 +17,7 @@ import Data.Int (Int32, Int64)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
 import Data.UUID (UUID)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Prelude
   ( Applicative(pure), Eq((==)), MonadFail(fail), Semigroup((<>)), Show(show)
@@ -292,6 +293,34 @@ main =
           squealRendering :: Text
           squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 1"
         checkStatement squealRendering statement
+
+      it "select * from users limit haskell(lim)" $ do
+        let
+          mkStatement
+            :: Word64
+            -> Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          mkStatement lim =
+            [ssql| select * from users limit haskell(lim) |]
+
+          squealRendering1 :: Text
+          squealRendering1 = "SELECT * FROM \"users\" AS \"users\" LIMIT 10"
+
+          squealRendering2 :: Text
+          squealRendering2 = "SELECT * FROM \"users\" AS \"users\" LIMIT 20"
+
+        checkStatement squealRendering1 (mkStatement 10)
+        checkStatement squealRendering2 (mkStatement 20)
 
       it "select * from users offset 1" $ do
         let

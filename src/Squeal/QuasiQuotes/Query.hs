@@ -1,5 +1,6 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -12,7 +13,7 @@ import Control.Applicative (Alternative((<|>)))
 import Control.Monad (unless, when)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
-  ( Exp(AppE, ConE, InfixE, LabelE, LitE, VarE), Lit(IntegerL), Q
+  ( Exp(AppE, ConE, InfixE, LabelE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right)
@@ -473,6 +474,31 @@ processSelectLimit tableExpr (Just selectLimit) = do
 renderPGTLimitClause :: PGT_AST.LimitClause -> Q Exp
 renderPGTLimitClause = \case
   PGT_AST.LimitLimitClause slValue _mOffsetVal -> case slValue of
+    PGT_AST.ExprSelectLimitValue
+      ( PGT_AST.CExprAExpr
+          ( PGT_AST.FuncCExpr
+              ( PGT_AST.ApplicationFuncExpr
+                  ( PGT_AST.FuncApplication
+                      (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                      ( Just
+                          ( PGT_AST.NormalFuncApplicationParams
+                              Nothing
+                              ( PGT_AST.ExprFuncArgExpr
+                                  ( PGT_AST.CExprAExpr
+                                      (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
+                                    )
+                                  NE.:| []
+                                )
+                              Nothing
+                            )
+                        )
+                    )
+                  Nothing
+                  Nothing
+                  Nothing
+                )
+            )
+        ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
     PGT_AST.ExprSelectLimitValue
       (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
         if n >= 0
