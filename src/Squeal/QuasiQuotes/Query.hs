@@ -131,10 +131,6 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
 
                 when (isJust maybeIntoClause) $
                   fail "INTO clause is not yet supported in this translation."
-                when (isJust maybeHavingClause) $
-                  fail $
-                    "HAVING clause is not yet supported in this translation "
-                      <> "for NormalSimpleSelect with FROM."
                 when (isJust maybeWindowClause) $
                   fail $
                     "WINDOW clause is not yet supported in this translation "
@@ -158,8 +154,21 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                 tableExprWithGroupBy <-
                   applyPGTGroupBy tableExprWithWhere maybeGroupClause
 
+                tableExprWithHaving <-
+                  case maybeHavingClause of
+                    Nothing -> pure tableExprWithGroupBy
+                    Just hc -> do
+                      when (isNothing maybeGroupClause) $
+                        fail "HAVING clause requires a GROUP BY clause."
+                      renderedHC <- renderPGTAExpr hc
+                      pure $
+                        InfixE
+                          (Just tableExprWithGroupBy)
+                          (VarE '(S.&))
+                          (Just (AppE (VarE 'S.having) renderedHC))
+
                 (tableExprWithOffset, mTableExprWithLimit) <-
-                  processSelectLimit tableExprWithGroupBy maybeSelectLimit
+                  processSelectLimit tableExprWithHaving maybeSelectLimit
 
                 let
                   baseFinalTableExpr =

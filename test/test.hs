@@ -1157,6 +1157,32 @@ main =
             "SELECT DISTINCT ON (\"employee_id\", \"name\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", \"id\" AS \"id\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC, \"name\" ASC"
         checkStatement squealRendering statement
 
+      describe "having clause" $ do
+        it
+          "select employee_id, count(id) from users group by employee_id having count(id) > 1"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "employee_id" UUID
+                     , ( Field "_col2" Int64 -- Assuming count returns Int64
+                       , ()
+                       )
+                     )
+              statement =
+                [ssql|
+                  select employee_id, count(id)
+                  from users
+                  group by employee_id
+                  having count(id) > 1
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"employee_id\" AS \"employee_id\", count(ALL \"id\") AS \"_col2\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\" HAVING (count(ALL \"id\") > 1)"
+            checkStatement squealRendering statement
+
 
 _printQuery :: (RenderSQL a) => a -> IO ()
 _printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL
