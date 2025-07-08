@@ -1017,6 +1017,34 @@ main =
             squealRendering = "SELECT * FROM (VALUES (CURRENT_DATE)) AS t (\"today\")"
           checkStatement squealRendering stmt
 
+        it "haskell variables in expressions" $ do
+          let
+            mkStatement
+              :: Text
+              -> Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            mkStatement n =
+              [ssql| select * from users where name = haskell(n) |]
+
+            squealRendering1 :: Text
+            squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
+
+            squealRendering2 :: Text
+            squealRendering2 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Bob' :: text))"
+
+          checkStatement squealRendering1 (mkStatement "Alice")
+          checkStatement squealRendering2 (mkStatement "Bob")
+
       -- PARENS (implicitly tested by complex expressions)
       it "select (id + 1) * 2 as calc from emails" $ do
         let

@@ -15,7 +15,7 @@ import Control.Applicative (Alternative((<|>)))
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, AppTypeE, ConE, InfixE, LabelE, ListE, LitE, TupE, VarE)
-  , Lit(IntegerL, StringL), TyLit(NumTyLit), Type(LitT), Q
+  , Lit(IntegerL, StringL), TyLit(NumTyLit), Type(LitT), Name, Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
@@ -481,31 +481,47 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
       case funcName of
         PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
         PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
-    squealFn :: Q Exp
-    squealFn =
-      case Text.toLower (Text.pack fnNameStr) of
-        "coalesce" -> pure $ VarE 'S.coalesce
-        "lower" -> pure $ VarE 'S.lower
-        "char_length" -> pure $ VarE 'S.charLength
-        "character_length" -> pure $ VarE 'S.charLength
-        "upper" -> pure $ VarE 'S.upper
-        "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
-        "now" -> pure $ VarE 'S.now
-        _ -> fail $ "Unsupported function: " <> fnNameStr
   in
-    case maybeParams of
-      Nothing -> squealFn -- No-argument function
-      Just params -> case params of
-        PGT_AST.NormalFuncApplicationParams _allOrDistinct args _sortClause -> do
-          fn <- squealFn
-          argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
-          pure $ foldl' AppE fn argExps
-        PGT_AST.StarFuncApplicationParams ->
-          -- Specific for count(*)
-          if fnNameStr == "count"
-            then pure $ VarE 'S.countStar
-            else fail "Star argument only supported for COUNT"
-        _ -> fail $ "Unsupported function parameters structure: " <> show params
+    if Text.toLower (Text.pack fnNameStr) == "haskell"
+      then case maybeParams of
+        Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+          case NE.toList args of
+            [ PGT_AST.ExprFuncArgExpr
+                (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+              ] -> do
+                let
+                  varName :: Name
+                  varName = mkName . Text.unpack . getIdentText $ ident
+                pure $ VarE 'S.inline `AppE` VarE varName
+            _ -> fail "haskell() function expects a single variable argument"
+        _ -> fail "haskell() function expects a single variable argument"
+      else
+        let
+          squealFn :: Q Exp
+          squealFn =
+            case Text.toLower (Text.pack fnNameStr) of
+              "coalesce" -> pure $ VarE 'S.coalesce
+              "lower" -> pure $ VarE 'S.lower
+              "char_length" -> pure $ VarE 'S.charLength
+              "character_length" -> pure $ VarE 'S.charLength
+              "upper" -> pure $ VarE 'S.upper
+              "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
+              "now" -> pure $ VarE 'S.now
+              _ -> fail $ "Unsupported function: " <> fnNameStr
+        in
+          case maybeParams of
+            Nothing -> squealFn -- No-argument function
+            Just params -> case params of
+              PGT_AST.NormalFuncApplicationParams _allOrDistinct args _sortClause -> do
+                fn <- squealFn
+                argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
+                pure $ foldl' AppE fn argExps
+              PGT_AST.StarFuncApplicationParams ->
+                -- Specific for count(*)
+                if fnNameStr == "count"
+                  then pure $ VarE 'S.countStar
+                  else fail "Star argument only supported for COUNT"
+              _ -> fail $ "Unsupported function parameters structure: " <> show params
 
 
 renderPGTFuncArgExpr :: PGT_AST.FuncArgExpr -> Q Exp
