@@ -9,15 +9,16 @@ module Squeal.QuasiQuotes.Query (
   toSquealQuery,
 ) where
 
-import Control.Monad (MonadFail(fail), mapM, unless, when)
+import Control.Monad (unless, when)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, ConE, InfixE, LabelE, ListE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right)
-  , Foldable(foldl', foldr, null), Maybe(Just, Nothing), Num((+)), Ord((>=))
-  , Semigroup((<>)), Show(show), ($), (&&), Int, fromIntegral, zip
+  , Foldable(foldl', foldr, null), Maybe(Just, Nothing), MonadFail(fail)
+  , Num((+)), Ord((>=)), Semigroup((<>)), Show(show), Traversable(mapM), ($)
+  , (&&), (<$>), Int, fromIntegral, zip
   )
 import Squeal.QuasiQuotes.Common
   ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargeting
@@ -47,7 +48,7 @@ toSquealSelectNoParens
   ( PGT_AST.SelectNoParens
       _maybeWithClause
       selectClause
-      _maybeSortClause
+      maybeSortClause
       maybeSelectLimit
       maybeForLockingClause
     ) =
@@ -55,6 +56,7 @@ toSquealSelectNoParens
       Left simpleSelect ->
         toSquealSimpleSelect
           simpleSelect
+          maybeSortClause
           maybeSelectLimit
           maybeForLockingClause
       Right selectWithParens' -> toSquealSelectWithParens selectWithParens'
@@ -62,10 +64,11 @@ toSquealSelectNoParens
 
 toSquealSimpleSelect
   :: PGT_AST.SimpleSelect
+  -> Maybe PGT_AST.SortClause
   -> Maybe PGT_AST.SelectLimit
   -> Maybe PGT_AST.ForLockingClause
   -> Q Exp
-toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
+toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
     PGT_AST.ValuesSimpleSelect valuesClause -> do
       unless (isNothing maybeSelectLimit && isNothing maybeForLockingClause) $
@@ -163,8 +166,19 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                           (VarE '(S.&))
                           (Just (AppE (VarE 'S.having) renderedHC))
 
+                tableExprWithOrderBy <-
+                  case maybeSortClause of
+                    Nothing -> pure tableExprWithHaving
+                    Just sortClause -> do
+                      renderedSC <- renderPGTSortClause sortClause
+                      pure $
+                        InfixE
+                          (Just tableExprWithHaving)
+                          (VarE '(S.&))
+                          (Just (AppE (VarE 'S.orderBy) renderedSC))
+
                 (tableExprWithOffset, mTableExprWithLimit) <-
-                  processSelectLimit tableExprWithHaving maybeSelectLimit
+                  processSelectLimit tableExprWithOrderBy maybeSelectLimit
 
                 let
                   baseFinalTableExpr =
@@ -542,5 +556,27 @@ renderPGTOnExpressionsClause exprs = do
       -- are typically specified in the ORDER BY clause.
       -- Here, we default to ASC for the SortExpression constructor.
       pure $ ConE 'S.Asc `AppE` squealExpr
+
+
+renderPGTSortClause :: PGT_AST.SortClause -> Q Exp
+renderPGTSortClause sortBys = ListE <$> mapM renderPGTSortBy (NE.toList sortBys)
+
+
+renderPGTSortBy :: PGT_AST.SortBy -> Q Exp
+renderPGTSortBy = \case
+  PGT_AST.AscDescSortBy aExpr maybeAscDesc maybeNullsOrder -> do
+    squealExpr <- renderPGTAExpr aExpr
+    let
+      (asc, desc) = case maybeNullsOrder of
+        Nothing -> ('S.Asc, 'S.Desc)
+        Just PGT_AST.FirstNullsOrder -> ('S.AscNullsFirst, 'S.DescNullsFirst)
+        Just PGT_AST.LastNullsOrder -> ('S.AscNullsLast, 'S.DescNullsLast)
+
+    let
+      constructor = case maybeAscDesc of
+        Just PGT_AST.DescAscDesc -> desc
+        _ -> asc -- default to ASC
+    pure $ ConE constructor `AppE` squealExpr
+  PGT_AST.UsingSortBy{} -> fail "ORDER BY USING is not supported"
 
 

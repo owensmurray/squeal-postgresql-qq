@@ -1265,6 +1265,67 @@ main =
             "SELECT DISTINCT ON (\"employee_id\", \"name\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", \"id\" AS \"id\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC, \"name\" ASC"
         checkStatement squealRendering statement
 
+      describe "order by" $ do
+        it "select * from users order by name" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" ASC"
+          checkStatement squealRendering statement
+
+        it "select * from users order by name asc" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name asc |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" ASC"
+          checkStatement squealRendering statement
+
+        it "select * from users order by name desc" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name desc |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" DESC"
+          checkStatement squealRendering statement
+
       describe "having clause" $ do
         it
           "select employee_id, count(id) from users group by employee_id having count(id) > 1"
