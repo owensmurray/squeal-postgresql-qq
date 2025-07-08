@@ -1,4 +1,5 @@
 {-# LANGUAGE GHC2024 #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -9,6 +10,7 @@ module Squeal.QuasiQuotes.Common (
   renderPGTAExpr,
   getIdentText,
   renderPGTTargeting,
+  renderPGTTargetList,
 ) where
 
 import Control.Applicative (Alternative((<|>)))
@@ -571,6 +573,8 @@ renderPGTAexprConst = \case
              )
   PGT_AST.SAexprConst s ->
     VarE 'fromString `AppE` LitE (StringL (Text.unpack s))
+  PGT_AST.BoolAexprConst True -> VarE 'S.true
+  PGT_AST.BoolAexprConst False -> VarE 'S.false
   PGT_AST.NullAexprConst -> VarE 'S.null_
   unsupported -> error $ "Unsupported AexprConst: " <> show unsupported
 

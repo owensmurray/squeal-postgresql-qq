@@ -732,6 +732,36 @@ main =
                 "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
             checkStatement squealRendering statement
 
+    describe "deletes" $ do
+      it "delete from users where true" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from users where true |]
+          squealRendering :: Text
+          squealRendering = "DELETE FROM \"users\" AS \"users\" WHERE TRUE"
+
+        checkStatement squealRendering statement
+
+      it "delete from emails where id = 1" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from emails where id = 1 |]
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
+        checkStatement squealRendering statement
+
+      it "delete from emails where email = haskell(e)" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from emails where email = haskell(e) |]
+          e :: Text
+          e = "foo"
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"emails\" AS \"emails\" WHERE (\"email\" = (E'foo' :: text))"
+        checkStatement squealRendering statement
+
     describe "scalar expressions" $ do
       -- Binary Operators
       it "select id != 'no-such-user' as neq from users" $ do

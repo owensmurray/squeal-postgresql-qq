@@ -20,6 +20,7 @@ import Prelude
   ( Applicative(pure), Either(Left, Right), MonadFail(fail), Semigroup((<>))
   , Show(show), ($), (.), String, error, print
   )
+import Squeal.QuasiQuotes.Delete (toSquealDelete)
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
 import Squeal.QuasiQuotes.RowType (Field(Field, unField), monoQuery)
@@ -53,6 +54,7 @@ toSquealStatement = \case
     queryExp <- toSquealQuery theQuery
     pure $ VarE 'monoQuery `AppE` queryExp
   PGT_AST.InsertPreparableStmt stmt -> toSquealInsert stmt
+  PGT_AST.DeletePreparableStmt stmt -> toSquealDelete stmt
   unsupported ->
     error $ "Unsupported statement: " <> show unsupported
 

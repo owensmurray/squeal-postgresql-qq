@@ -42,6 +42,7 @@ library
     Squeal.QuasiQuotes
   other-modules:
     Squeal.QuasiQuotes.Common
+    Squeal.QuasiQuotes.Delete
     Squeal.QuasiQuotes.Insert
     Squeal.QuasiQuotes.Query
     Squeal.QuasiQuotes.RowType
