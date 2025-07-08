@@ -274,7 +274,7 @@ main =
           squealRendering = "SELECT \"users\".* FROM \"other\".\"users\" AS \"users\""
         checkStatement squealRendering statement
 
-      it "select * from users limit 1" $ do
+      it "select * from users limit 3" $ do
         let
           statement
             :: Statement
@@ -289,9 +289,9 @@ main =
                      )
                    )
                  )
-          statement = [ssql| select * from users limit 1 |]
+          statement = [ssql| select * from users limit 3 |]
           squealRendering :: Text
-          squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 1"
+          squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 3"
         checkStatement squealRendering statement
 
       it "select * from users limit haskell(lim)" $ do
