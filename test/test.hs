@@ -1092,6 +1092,71 @@ main =
           squealRendering = "SELECT * FROM \"json_test\" AS \"json_test\""
         checkStatement squealRendering statement
 
+      it "select distinct name from users" $ do
+        let
+          statement :: Statement DB () (Field "name" Text, ())
+          statement = [ssql| select distinct name from users |]
+          squealRendering :: Text
+          squealRendering = "SELECT DISTINCT \"name\" AS \"name\" FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select distinct * from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select distinct * from users |]
+          squealRendering :: Text
+          squealRendering = "SELECT DISTINCT * FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select distinct on (employee_id) employee_id, name from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "employee_id" UUID
+                 , ( Field "name" Text
+                   , ()
+                   )
+                 )
+          statement = [ssql| select distinct on (employee_id) employee_id, name from users |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT DISTINCT ON (\"employee_id\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC"
+        checkStatement squealRendering statement
+
+      it "select distinct on (employee_id, name) employee_id, name, id from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "employee_id" UUID
+                 , ( Field "name" Text
+                   , ( Field "id" Text
+                     , ()
+                     )
+                   )
+                 )
+          statement =
+            [ssql| select distinct on (employee_id, name) employee_id, name, id from users |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT DISTINCT ON (\"employee_id\", \"name\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", \"id\" AS \"id\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC, \"name\" ASC"
+        checkStatement squealRendering statement
+
 
 _printQuery :: (RenderSQL a) => a -> IO ()
 _printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL

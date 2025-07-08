@@ -13,13 +13,13 @@ import Control.Applicative (Alternative((<|>)))
 import Control.Monad (unless, when)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
-  ( Exp(AppE, ConE, InfixE, LabelE, LitE, VarE), Lit(IntegerL), Q, mkName
+  ( Exp(AppE, ConE, InfixE, LabelE, ListE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right)
-  , Foldable(foldl', foldr, null), Maybe(Just, Nothing), MonadFail(fail)
-  , Num((+)), Ord((>=)), Semigroup((<>)), Show(show), Traversable(mapM), ($)
-  , (&&), Int, any, fromIntegral, zip
+  , Foldable(foldl', foldr, null), Functor(fmap), Maybe(Just, Nothing)
+  , MonadFail(fail), Num((+)), Ord((>=)), Semigroup((<>)), Show(show)
+  , Traversable(mapM), ($), (&&), Int, any, fromIntegral, zip
   )
 import Squeal.QuasiQuotes.Common
   ( getIdentText, renderPGTAExpr, renderPGTTableRef
@@ -182,11 +182,26 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                           baseFinalTableExpr
                           lockingClauseExps
 
-                selectionTargetExp <-
+                (selectionTargetExp, maybeDistinctOnExprs) <-
                   renderPGTTargeting targeting
+
+                squealSelectFn <-
+                  case maybeDistinctOnExprs of
+                    Nothing ->
+                      case targeting of
+                        PGT_AST.DistinctTargeting Nothing _ ->
+                          pure $ VarE 'S.selectDistinct
+                        _ -> pure $ VarE 'S.select -- Normal or ALL
+                    Just distinctOnAstExprs -> do
+                      distinctOnSquealSortExps <-
+                        renderPGTOnExpressionsClause distinctOnAstExprs
+                      pure $
+                        VarE 'S.selectDistinctOn
+                          `AppE` distinctOnSquealSortExps
+
                 pure $
                   VarE 'monoQuery
-                    `AppE` ( VarE 'S.select
+                    `AppE` ( squealSelectFn
                                `AppE` selectionTargetExp
                                `AppE` finalTableExprWithPotentialLocking
                            )
@@ -222,19 +237,47 @@ renderValuesClauseToNP (firstRowExps NE.:| restRowExps) = do
           pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
 
 
-renderPGTTargeting :: PGT_AST.Targeting -> Q Exp
+{- |
+  Translates the `Targeting` clause of a SQL SELECT statement from the
+  `postgresql-syntax` AST (`PGT_AST.Targeting`) into a Squeal representation.
+  The `Targeting` clause defines the list of expressions or columns to be
+  returned by the query (e.g., `*`, `col1`, `col2 AS alias`, `DISTINCT col3`).
+
+  The function returns a Template Haskell `Q` computation that, when run,
+  produces a pair:
+  1. `Exp`: A Template Haskell expression representing the Squeal selection list.
+     This could be `S.Star` for `SELECT *`, or a constructed Squeal expression
+     for a list of target elements (e.g., `expression1 :* expression2 :* S.Nil`).
+  2. `Maybe [PGT_AST.AExpr]`: This field is used to pass along the expressions
+     from a `DISTINCT ON (expr1, expr2, ...)` clause. If the query uses
+     `DISTINCT ON`, this will be `Just` containing the list of `PGT_AST.AExpr`
+     nodes representing `expr1, expr2, ...`. For all other types of targeting
+     (e.g., `SELECT DISTINCT col`, `SELECT col1, col2`, `SELECT *`), this
+     will be `Nothing`.
+
+  The function handles different kinds of targeting:
+  - `PGT_AST.NormalTargeting`: Standard `SELECT col1, col2, ...`
+  - `PGT_AST.AllTargeting`: `SELECT ALL ...` (often equivalent to normal select or `SELECT *`)
+  - `PGT_AST.DistinctTargeting`: `SELECT DISTINCT ...` or `SELECT DISTINCT ON (...) ...`
+
+  Returns (SquealSelectionListExp, Maybe DistinctOnAstExpressions)
+-}
+renderPGTTargeting
+  :: PGT_AST.Targeting
+  -> Q (Exp, Maybe [PGT_AST.AExpr])
 renderPGTTargeting = \case
   PGT_AST.NormalTargeting targetList -> do
     selListExp <- renderPGTTargetList targetList
-    pure selListExp
+    pure (selListExp, Nothing)
   PGT_AST.AllTargeting maybeTargetList -> do
     selListExp <-
       case maybeTargetList of
         Nothing -> pure $ ConE 'S.Star -- SELECT ALL (which is like SELECT *)
         Just tl -> renderPGTTargetList tl
-    pure selListExp
-  PGT_AST.DistinctTargeting _ _ ->
-    fail "DISTINCT queries are not supported by this quasi-quoter yet."
+    pure (selListExp, Nothing)
+  PGT_AST.DistinctTargeting maybeOnExprs targetList -> do
+    selListExp <- renderPGTTargetList targetList
+    pure (selListExp, fmap NE.toList maybeOnExprs)
 
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
@@ -621,9 +664,24 @@ renderPGTTargetingForValues = \case
     fail $
       "SELECT * (ALL targeting without a list) is not supported "
         <> "with VALUES clause."
-  PGT_AST.DistinctTargeting _ _ ->
+  PGT_AST.DistinctTargeting{} ->
+    -- Handles both DISTINCT and DISTINCT ON
     fail $
-      "DISTINCT queries are not supported with VALUES clause in "
+      "DISTINCT and DISTINCT ON queries are not supported with VALUES clause in "
         <> "this translation."
+
+
+renderPGTOnExpressionsClause :: [PGT_AST.AExpr] -> Q Exp
+renderPGTOnExpressionsClause exprs = do
+    renderedSortExps <- mapM renderToSortExpr exprs
+    pure $ ListE renderedSortExps
+  where
+    renderToSortExpr :: PGT_AST.AExpr -> Q Exp
+    renderToSortExpr astExpr = do
+      squealExpr <- renderPGTAExpr astExpr
+      -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
+      -- are typically specified in the ORDER BY clause.
+      -- Here, we default to ASC for the SortExpression constructor.
+      pure $ ConE 'S.Asc `AppE` squealExpr
 
 
