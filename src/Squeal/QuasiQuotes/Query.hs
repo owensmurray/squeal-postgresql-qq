@@ -24,7 +24,6 @@ import Prelude
 import Squeal.QuasiQuotes.Common
   ( getIdentText, renderPGTAExpr, renderPGTTableRef
   )
-import Squeal.QuasiQuotes.RowType (monoQuery)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
@@ -76,7 +75,7 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
           "OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
             <> "in this translation yet."
       renderedValues <- renderValuesClauseToNP valuesClause
-      pure $ VarE 'monoQuery `AppE` (VarE 'S.values_ `AppE` renderedValues)
+      pure $ VarE 'S.values_ `AppE` renderedValues
     PGT_AST.NormalSimpleSelect
       maybeTargeting
       maybeIntoClause
@@ -115,8 +114,7 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                     renderedTargetingForValues <-
                       renderPGTTargetingForValues targeting
                     pure $
-                      VarE 'monoQuery
-                        `AppE` (VarE 'S.values_ `AppE` renderedTargetingForValues)
+                      VarE 'S.values_ `AppE` renderedTargetingForValues
               (Nothing, _, _, _, _, _, _) ->
                 {-
                   Case: SELECT <targeting_list> (no FROM, but other
@@ -209,11 +207,9 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                           `AppE` distinctOnSquealSortExps
 
                 pure $
-                  VarE 'monoQuery
-                    `AppE` ( squealSelectFn
-                               `AppE` selectionTargetExp
-                               `AppE` finalTableExprWithPotentialLocking
-                           )
+                  squealSelectFn
+                    `AppE` selectionTargetExp
+                    `AppE` finalTableExprWithPotentialLocking
     unsupportedSimpleSelect ->
       fail $
         "Unsupported simple select statement: "

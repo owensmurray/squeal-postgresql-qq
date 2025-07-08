@@ -1,6 +1,7 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 
 {- |
   Description: quasiquoter understanding SQL and producing
@@ -14,14 +15,14 @@ module Squeal.QuasiQuotes (
 import Language.Haskell.TH.Quote
   ( QuasiQuoter(QuasiQuoter, quoteDec, quoteExp, quotePat, quoteType)
   )
-import Language.Haskell.TH.Syntax (Exp, Q, runIO)
+import Language.Haskell.TH.Syntax (Exp(AppE, VarE), Q, runIO)
 import Prelude
-  ( Either(Left, Right), MonadFail(fail), Semigroup((<>)), Show(show), ($), (.)
-  , String, error, print
+  ( Applicative(pure), Either(Left, Right), MonadFail(fail), Semigroup((<>))
+  , Show(show), ($), (.), String, error, print
   )
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
 import Squeal.QuasiQuotes.Query (toSquealQuery)
-import Squeal.QuasiQuotes.RowType (Field(Field, unField))
+import Squeal.QuasiQuotes.RowType (Field(Field, unField), monoQuery)
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
 import qualified PostgresqlSyntax.Parsing as PGT_Parse
@@ -48,7 +49,9 @@ toSqueal = \case
 
 toSquealStatement :: PGT_AST.PreparableStmt -> Q Exp
 toSquealStatement = \case
-  PGT_AST.SelectPreparableStmt theQuery -> toSquealQuery theQuery
+  PGT_AST.SelectPreparableStmt theQuery -> do
+    queryExp <- toSquealQuery theQuery
+    pure $ VarE 'monoQuery `AppE` queryExp
   PGT_AST.InsertPreparableStmt stmt -> toSquealInsert stmt
   unsupported ->
     error $ "Unsupported statement: " <> show unsupported
