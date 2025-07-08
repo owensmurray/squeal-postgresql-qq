@@ -25,6 +25,7 @@
 module Squeal.QuasiQuotes.RowType (
   RowType,
   monoQuery,
+  monoManipulation,
   Field (..),
 ) where
 
@@ -130,6 +131,17 @@ monoQuery
   => Squeal.Query '[] '[] db params row
   -> Squeal.Statement db input (RowType row)
 monoQuery = Squeal.Query Squeal.genericParams getRowDecoder
+
+
+monoManipulation
+  :: forall db params input row ignored.
+     ( HasRowDecoder row (RowType row)
+     , SListI row
+     , Squeal.GenericParams db params input ignored
+     )
+  => Squeal.Manipulation '[] db params row
+  -> Squeal.Statement db input (RowType row)
+monoManipulation = Squeal.Manipulation Squeal.genericParams getRowDecoder
 
 
 class HasRowDecoder row x where

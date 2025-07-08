@@ -16,6 +16,7 @@ import Prelude
   , otherwise
   )
 import Squeal.QuasiQuotes.Common (getIdentText, renderPGTAExpr)
+import Squeal.QuasiQuotes.Query (toSquealQuery)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
@@ -34,22 +35,33 @@ toSquealInsert
     insertManipulation <-
       case insertRest of
         PGT_AST.SelectInsertRest maybeInsertColumnList _maybeOverrideKind selectStmt -> do
-          let
-            colNames = case maybeInsertColumnList of
-              Just items -> NE.toList items -- InsertColumnList is NonEmpty InsertColumnItem
-              Nothing -> error "INSERT statements must specify column names for this quasi-quoter."
-            valuesClause = case selectStmt of
-              Left (PGT_AST.SelectNoParens _ (Left (PGT_AST.ValuesSimpleSelect vc)) _ _ _) -> vc
+          queryClauseExp <-
+            case selectStmt of
+              -- Case 1: INSERT ... VALUES ...
+              Left
+                (PGT_AST.SelectNoParens _ (Left (PGT_AST.ValuesSimpleSelect valuesClause)) _ _ _) ->
+                  case maybeInsertColumnList of
+                    Just colItems ->
+                      renderPGTValueRows (NE.toList colItems) valuesClause
+                    Nothing ->
+                      fail
+                        "INSERT INTO ... VALUES must specify column names for the Squeal-QQ translation."
+              -- Case 2: INSERT ... SELECT ... (a general SELECT statement)
               _ ->
-                error
-                  "INSERT statement currently only supports VALUES clause directly in SELECT."
-          renderedValueRows <- renderPGTValueRows colNames valuesClause
+                -- selectStmt is not a ValuesSimpleSelect (i.e., it's a general query)
+                case maybeInsertColumnList of
+                  Just _ ->
+                    fail
+                      "INSERT INTO table (columns) SELECT ... is not yet supported by Squeal-QQ. Please use INSERT INTO table SELECT ... and ensure your SELECT statement provides all columns for the table, matching the table's column order and types."
+                  Nothing -> do
+                    squealQueryExp <- toSquealQuery selectStmt -- from Squeal.QuasiQuotes.Query
+                    pure (ConE 'S.Subquery `AppE` squealQueryExp)
           pure $
             VarE 'S.insertInto_
               `AppE` renderPGTInsertTarget insertTarget
-              `AppE` renderedValueRows
+              `AppE` queryClauseExp
         PGT_AST.DefaultValuesInsertRest ->
-          fail "DEFAULT VALUES insert statements are not yet supported."
+          fail "INSERT INTO ... DEFAULT VALUES is not yet supported by Squeal-QQ."
     pure $ VarE 'S.manipulation `AppE` insertManipulation
 
 

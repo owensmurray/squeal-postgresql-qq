@@ -1,5 +1,6 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -8,22 +9,20 @@ module Squeal.QuasiQuotes.Query (
   toSquealQuery,
 ) where
 
-import Control.Applicative (Alternative((<|>)))
 import Control.Monad (unless, when)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
-  ( Exp(AppE, ConE, InfixE, LabelE, LitE, VarE), Lit(IntegerL), Q
+  ( Exp(AppE, ConE, InfixE, LabelE, ListE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right)
   , Foldable(foldl', foldr, null), Maybe(Just, Nothing), MonadFail(fail)
   , Num((+)), Ord((>=)), Semigroup((<>)), Show(show), Traversable(mapM), ($)
-  , (&&), Int, any, fromIntegral, zip
+  , (&&), (<$>), Int, fromIntegral, zip
   )
 import Squeal.QuasiQuotes.Common
-  ( getIdentText, renderPGTAExpr, renderPGTTableRef
+  ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargeting
   )
-import Squeal.QuasiQuotes.RowType (monoQuery)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
@@ -49,7 +48,7 @@ toSquealSelectNoParens
   ( PGT_AST.SelectNoParens
       _maybeWithClause
       selectClause
-      _maybeSortClause
+      maybeSortClause
       maybeSelectLimit
       maybeForLockingClause
     ) =
@@ -57,6 +56,7 @@ toSquealSelectNoParens
       Left simpleSelect ->
         toSquealSimpleSelect
           simpleSelect
+          maybeSortClause
           maybeSelectLimit
           maybeForLockingClause
       Right selectWithParens' -> toSquealSelectWithParens selectWithParens'
@@ -64,10 +64,11 @@ toSquealSelectNoParens
 
 toSquealSimpleSelect
   :: PGT_AST.SimpleSelect
+  -> Maybe PGT_AST.SortClause
   -> Maybe PGT_AST.SelectLimit
   -> Maybe PGT_AST.ForLockingClause
   -> Q Exp
-toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
+toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
     PGT_AST.ValuesSimpleSelect valuesClause -> do
       unless (isNothing maybeSelectLimit && isNothing maybeForLockingClause) $
@@ -75,7 +76,7 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
           "OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
             <> "in this translation yet."
       renderedValues <- renderValuesClauseToNP valuesClause
-      pure $ VarE 'monoQuery `AppE` (VarE 'S.values_ `AppE` renderedValues)
+      pure $ VarE 'S.values_ `AppE` renderedValues
     PGT_AST.NormalSimpleSelect
       maybeTargeting
       maybeIntoClause
@@ -114,8 +115,7 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                     renderedTargetingForValues <-
                       renderPGTTargetingForValues targeting
                     pure $
-                      VarE 'monoQuery
-                        `AppE` (VarE 'S.values_ `AppE` renderedTargetingForValues)
+                      VarE 'S.values_ `AppE` renderedTargetingForValues
               (Nothing, _, _, _, _, _, _) ->
                 {-
                   Case: SELECT <targeting_list> (no FROM, but other
@@ -130,10 +130,6 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
 
                 when (isJust maybeIntoClause) $
                   fail "INTO clause is not yet supported in this translation."
-                when (isJust maybeHavingClause) $
-                  fail $
-                    "HAVING clause is not yet supported in this translation "
-                      <> "for NormalSimpleSelect with FROM."
                 when (isJust maybeWindowClause) $
                   fail $
                     "WINDOW clause is not yet supported in this translation "
@@ -157,8 +153,32 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                 tableExprWithGroupBy <-
                   applyPGTGroupBy tableExprWithWhere maybeGroupClause
 
+                tableExprWithHaving <-
+                  case maybeHavingClause of
+                    Nothing -> pure tableExprWithGroupBy
+                    Just hc -> do
+                      when (isNothing maybeGroupClause) $
+                        fail "HAVING clause requires a GROUP BY clause."
+                      renderedHC <- renderPGTAExpr hc
+                      pure $
+                        InfixE
+                          (Just tableExprWithGroupBy)
+                          (VarE '(S.&))
+                          (Just (AppE (VarE 'S.having) renderedHC))
+
+                tableExprWithOrderBy <-
+                  case maybeSortClause of
+                    Nothing -> pure tableExprWithHaving
+                    Just sortClause -> do
+                      renderedSC <- renderPGTSortClause sortClause
+                      pure $
+                        InfixE
+                          (Just tableExprWithHaving)
+                          (VarE '(S.&))
+                          (Just (AppE (VarE 'S.orderBy) renderedSC))
+
                 (tableExprWithOffset, mTableExprWithLimit) <-
-                  processSelectLimit tableExprWithGroupBy maybeSelectLimit
+                  processSelectLimit tableExprWithOrderBy maybeSelectLimit
 
                 let
                   baseFinalTableExpr =
@@ -181,13 +201,27 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                           baseFinalTableExpr
                           lockingClauseExps
 
-                selectionTargetExp <- renderPGTTargeting targeting
+                (selectionTargetExp, maybeDistinctOnExprs) <-
+                  renderPGTTargeting targeting
+
+                squealSelectFn <-
+                  case maybeDistinctOnExprs of
+                    Nothing ->
+                      case targeting of
+                        PGT_AST.DistinctTargeting Nothing _ ->
+                          pure $ VarE 'S.selectDistinct
+                        _ -> pure $ VarE 'S.select -- Normal or ALL
+                    Just distinctOnAstExprs -> do
+                      distinctOnSquealSortExps <-
+                        renderPGTOnExpressionsClause distinctOnAstExprs
+                      pure $
+                        VarE 'S.selectDistinctOn
+                          `AppE` distinctOnSquealSortExps
+
                 pure $
-                  VarE 'monoQuery
-                    `AppE` ( VarE 'S.select
-                               `AppE` selectionTargetExp
-                               `AppE` finalTableExprWithPotentialLocking
-                           )
+                  squealSelectFn
+                    `AppE` selectionTargetExp
+                    `AppE` finalTableExprWithPotentialLocking
     unsupportedSimpleSelect ->
       fail $
         "Unsupported simple select statement: "
@@ -218,21 +252,6 @@ renderValuesClauseToNP (firstRowExps NE.:| restRowExps) = do
           restExp <- go fs (idx + 1) -- restExp is Exp here
           -- Correct construction: aliasedExp :* restExp
           pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
-
-
-renderPGTTargeting :: PGT_AST.Targeting -> Q Exp
-renderPGTTargeting = \case
-  PGT_AST.NormalTargeting targetList -> do
-    selListExp <- renderPGTTargetList targetList
-    pure selListExp
-  PGT_AST.AllTargeting maybeTargetList -> do
-    selListExp <-
-      case maybeTargetList of
-        Nothing -> pure $ ConE 'S.Star -- SELECT ALL (which is like SELECT *)
-        Just tl -> renderPGTTargetList tl
-    pure selListExp
-  PGT_AST.DistinctTargeting _ _ ->
-    fail "DISTINCT queries are not supported by this quasi-quoter yet."
 
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
@@ -297,108 +316,6 @@ renderPGTWaiting = \case
   Nothing -> pure $ ConE 'S.Wait -- Default (no NOWAIT or SKIP LOCKED)
   Just False -> pure $ ConE 'S.NoWait -- NOWAIT
   Just True -> pure $ ConE 'S.SkipLocked -- SKIP LOCKED
-
-
-renderPGTTargetList :: PGT_AST.TargetList -> Q Exp
-renderPGTTargetList (item NE.:| items) =
-    if null items && isAsterisk item
-      then
-        pure $ ConE 'S.Star
-      else
-        if null items && isDotStar item
-          then
-            renderPGTTargetElDotStar item
-          else
-            go (item : items) 1
-  where
-    isAsterisk PGT_AST.AsteriskTargetEl = True
-    isAsterisk _ = False
-
-    isDotStar
-      ( PGT_AST.ExprTargetEl
-          ( PGT_AST.CExprAExpr
-              (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref _ (Just indirection)))
-            )
-        ) =
-        any isAllIndirectionEl (NE.toList indirection)
-    isDotStar _ = False
-
-    isAllIndirectionEl PGT_AST.AllIndirectionEl = True
-    isAllIndirectionEl _ = False
-
-    renderPGTTargetElDotStar :: PGT_AST.TargetEl -> Q Exp
-    renderPGTTargetElDotStar
-      ( PGT_AST.ExprTargetEl
-          ( PGT_AST.CExprAExpr
-              ( PGT_AST.ColumnrefCExpr
-                  ( PGT_AST.Columnref
-                      qualName
-                      indirectionOpt
-                    )
-                )
-            )
-        ) =
-        case indirectionOpt of
-          Just indirection
-            | any isAllIndirectionEl (NE.toList indirection) ->
-                pure $
-                  ConE 'S.DotStar
-                    `AppE` (LabelE (Text.unpack (getIdentText qualName)))
-          _ ->
-            fail $
-              "renderPGTTargetElDotStar called with non-DotStar "
-                <> "TargetEl structure"
-    renderPGTTargetElDotStar _ =
-      fail "renderPGTTargetElDotStar called with unexpected TargetEl"
-
-    go :: [PGT_AST.TargetEl] -> Int -> Q Exp
-    go [] _ =
-      {- Should not happen with NonEmpty input to renderPGTTargetList -}
-      fail "Empty selection list items in go."
-    go [el] currentIdx = renderPGTTargetEl el Nothing currentIdx
-    go (el : more) currentIdx = do
-      renderedEl <- renderPGTTargetEl el Nothing currentIdx
-      if null more
-        then pure renderedEl
-        else do
-          restRendered <- go more (currentIdx + 1)
-          pure $ ConE 'S.Also `AppE` restRendered `AppE` renderedEl
-
-
-renderPGTTargetEl :: PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
-renderPGTTargetEl targetEl mOuterAlias idx =
-  let
-    (exprAST, mInternalAlias) = case targetEl of
-      PGT_AST.AliasedExprTargetEl e an -> (e, Just an)
-      PGT_AST.ImplicitlyAliasedExprTargetEl e an -> (e, Just an)
-      PGT_AST.ExprTargetEl e -> (e, Nothing)
-      PGT_AST.AsteriskTargetEl ->
-        ( PGT_AST.CExprAExpr
-            ( PGT_AST.AexprConstCExpr
-                PGT_AST.NullAexprConst
-            )
-        , Nothing -- Placeholder for Star, should be S.Star
-        )
-    finalAliasName = mOuterAlias <|> mInternalAlias
-  in
-    case targetEl of
-      PGT_AST.AsteriskTargetEl -> pure $ ConE 'S.Star
-      _ -> do
-        renderedScalarExp <- renderPGTAExpr exprAST
-        case exprAST of
-          PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr _)
-            | Nothing <- finalAliasName ->
-                pure renderedScalarExp
-          _ -> do
-            let
-              aliasLabelStr =
-                case finalAliasName of
-                  Just ident -> Text.unpack $ getIdentText ident
-                  Nothing -> "_col" <> show idx
-            pure $
-              VarE 'S.as
-                `AppE` renderedScalarExp
-                `AppE` LabelE aliasLabelStr
 
 
 applyPGTGroupBy :: Exp -> Maybe PGT_AST.GroupClause -> Q Exp
@@ -472,15 +389,41 @@ processSelectLimit tableExpr (Just selectLimit) = do
 
 renderPGTLimitClause :: PGT_AST.LimitClause -> Q Exp
 renderPGTLimitClause = \case
-  PGT_AST.LimitLimitClause slValue _mOffsetVal -> case slValue of
-    PGT_AST.ExprSelectLimitValue
-      (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
-        if n >= 0
-          then pure (LitE (IntegerL (fromIntegral n)))
-          else fail $ "LIMIT value must be non-negative: " <> show n
-    PGT_AST.AllSelectLimitValue ->
-      fail "LIMIT ALL not supported in this translation."
-    expr -> fail $ "Unsupported LIMIT expression: " <> show expr
+  PGT_AST.LimitLimitClause slValue _mOffsetVal ->
+    case slValue of
+      PGT_AST.ExprSelectLimitValue
+        ( PGT_AST.CExprAExpr
+            ( PGT_AST.FuncCExpr
+                ( PGT_AST.ApplicationFuncExpr
+                    ( PGT_AST.FuncApplication
+                        (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                        ( Just
+                            ( PGT_AST.NormalFuncApplicationParams
+                                Nothing
+                                ( PGT_AST.ExprFuncArgExpr
+                                    ( PGT_AST.CExprAExpr
+                                        (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
+                                      )
+                                    NE.:| []
+                                  )
+                                Nothing
+                              )
+                          )
+                      )
+                    Nothing
+                    Nothing
+                    Nothing
+                  )
+              )
+          ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
+      PGT_AST.ExprSelectLimitValue
+        (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
+          if n >= 0
+            then pure (LitE (IntegerL (fromIntegral n)))
+            else fail $ "LIMIT value must be non-negative: " <> show n
+      PGT_AST.AllSelectLimitValue ->
+        fail "LIMIT ALL not supported in this translation."
+      expr -> fail $ "Unsupported LIMIT expression: " <> show expr
   PGT_AST.FetchOnlyLimitClause _ mVal _ -> case mVal of
     Just (PGT_AST.NumSelectFetchFirstValue _ (Left n)) ->
       if n >= 0
@@ -505,6 +448,31 @@ renderPGTLimitClause = \case
 
 renderPGTOffsetClause :: PGT_AST.OffsetClause -> Q Exp
 renderPGTOffsetClause = \case
+  PGT_AST.ExprOffsetClause
+    ( PGT_AST.CExprAExpr
+        ( PGT_AST.FuncCExpr
+            ( PGT_AST.ApplicationFuncExpr
+                ( PGT_AST.FuncApplication
+                    (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                    ( Just
+                        ( PGT_AST.NormalFuncApplicationParams
+                            Nothing
+                            ( PGT_AST.ExprFuncArgExpr
+                                ( PGT_AST.CExprAExpr
+                                    (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
+                                  )
+                                NE.:| []
+                              )
+                            Nothing
+                          )
+                      )
+                  )
+                Nothing
+                Nothing
+                Nothing
+              )
+          )
+      ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
   PGT_AST.ExprOffsetClause
     (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
       if n >= 0
@@ -569,9 +537,46 @@ renderPGTTargetingForValues = \case
     fail $
       "SELECT * (ALL targeting without a list) is not supported "
         <> "with VALUES clause."
-  PGT_AST.DistinctTargeting _ _ ->
+  PGT_AST.DistinctTargeting{} ->
+    -- Handles both DISTINCT and DISTINCT ON
     fail $
-      "DISTINCT queries are not supported with VALUES clause in "
+      "DISTINCT and DISTINCT ON queries are not supported with VALUES clause in "
         <> "this translation."
+
+
+renderPGTOnExpressionsClause :: [PGT_AST.AExpr] -> Q Exp
+renderPGTOnExpressionsClause exprs = do
+    renderedSortExps <- mapM renderToSortExpr exprs
+    pure $ ListE renderedSortExps
+  where
+    renderToSortExpr :: PGT_AST.AExpr -> Q Exp
+    renderToSortExpr astExpr = do
+      squealExpr <- renderPGTAExpr astExpr
+      -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
+      -- are typically specified in the ORDER BY clause.
+      -- Here, we default to ASC for the SortExpression constructor.
+      pure $ ConE 'S.Asc `AppE` squealExpr
+
+
+renderPGTSortClause :: PGT_AST.SortClause -> Q Exp
+renderPGTSortClause sortBys = ListE <$> mapM renderPGTSortBy (NE.toList sortBys)
+
+
+renderPGTSortBy :: PGT_AST.SortBy -> Q Exp
+renderPGTSortBy = \case
+  PGT_AST.AscDescSortBy aExpr maybeAscDesc maybeNullsOrder -> do
+    squealExpr <- renderPGTAExpr aExpr
+    let
+      (asc, desc) = case maybeNullsOrder of
+        Nothing -> ('S.Asc, 'S.Desc)
+        Just PGT_AST.FirstNullsOrder -> ('S.AscNullsFirst, 'S.DescNullsFirst)
+        Just PGT_AST.LastNullsOrder -> ('S.AscNullsLast, 'S.DescNullsLast)
+
+    let
+      constructor = case maybeAscDesc of
+        Just PGT_AST.DescAscDesc -> desc
+        _ -> asc -- default to ASC
+    pure $ ConE constructor `AppE` squealExpr
+  PGT_AST.UsingSortBy{} -> fail "ORDER BY USING is not supported"
 
 

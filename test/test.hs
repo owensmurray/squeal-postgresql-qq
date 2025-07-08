@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -17,6 +18,7 @@ import Data.Int (Int32, Int64)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
 import Data.UUID (UUID)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Prelude
   ( Applicative(pure), Eq((==)), MonadFail(fail), Semigroup((<>)), Show(show)
@@ -60,7 +62,14 @@ type Schema =
    ,     "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
    , "jsonb_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjsonb])
    ,  "json_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjson])
+   , "users_copy" ::: 'Table (UsersCopyConstraints :=> UsersCopyColumns)
    ]
+type UsersCopyColumns =
+  '[ "id"   ::: 'NoDef :=> 'NotNull 'PGtext
+   , "name" ::: 'NoDef :=> 'NotNull 'PGtext
+   , "bio"  ::: 'NoDef :=> 'Null    'PGtext
+   ]
+type UsersCopyConstraints = '[ "pk_users_copy" ::: 'PrimaryKey '["id"] ]
 type DB =
   '[ "public" ::: Schema
    ,  "other" ::: Schema
@@ -273,7 +282,7 @@ main =
           squealRendering = "SELECT \"users\".* FROM \"other\".\"users\" AS \"users\""
         checkStatement squealRendering statement
 
-      it "select * from users limit 1" $ do
+      it "select * from users limit 3" $ do
         let
           statement
             :: Statement
@@ -288,10 +297,66 @@ main =
                      )
                    )
                  )
-          statement = [ssql| select * from users limit 1 |]
+          statement = [ssql| select * from users limit 3 |]
           squealRendering :: Text
-          squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 1"
+          squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 3"
         checkStatement squealRendering statement
+
+      it "select * from users limit haskell(lim)" $ do
+        let
+          mkStatement
+            :: Word64
+            -> Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          mkStatement lim =
+            [ssql| select * from users limit haskell(lim) |]
+
+          squealRendering1 :: Text
+          squealRendering1 = "SELECT * FROM \"users\" AS \"users\" LIMIT 10"
+
+          squealRendering2 :: Text
+          squealRendering2 = "SELECT * FROM \"users\" AS \"users\" LIMIT 20"
+
+        checkStatement squealRendering1 (mkStatement 10)
+        checkStatement squealRendering2 (mkStatement 20)
+
+      it "select * from users offset haskell(off)" $ do
+        let
+          mkStatement
+            :: Word64
+            -> Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          mkStatement off =
+            [ssql| select * from users offset haskell(off) |]
+
+          squealRendering1 :: Text
+          squealRendering1 = "SELECT * FROM \"users\" AS \"users\" OFFSET 5"
+
+          squealRendering2 :: Text
+          squealRendering2 = "SELECT * FROM \"users\" AS \"users\" OFFSET 15"
+
+        checkStatement squealRendering1 (mkStatement 5)
+        checkStatement squealRendering2 (mkStatement 15)
 
       it "select * from users offset 1" $ do
         let
@@ -626,6 +691,119 @@ main =
               "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (DEFAULT, (E'foo' :: text), NULL)"
           checkStatement squealRendering statement
 
+      describe "insert ... select ..." $ do
+        it "insert into emails select id, user_id, email from emails where id = 1" $ do
+          let
+            statement :: Statement DB () ()
+            statement =
+              [ssql|
+                insert into emails
+                select id, user_id, email from emails where id = 1
+              |]
+            squealRendering :: Text
+            squealRendering =
+              "INSERT INTO \"emails\" AS \"emails\" SELECT \"id\" AS \"id\", \"user_id\" AS \"user_id\", \"email\" AS \"email\" FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
+          checkStatement squealRendering statement
+
+        it "insert into emails select id, user_id, email from emails where id = $1" $ do
+          let
+            statement :: Statement DB (Only Int32) ()
+            statement =
+              [ssql|
+                insert into emails
+                select id, user_id, email from emails where id = $1
+              |]
+            squealRendering :: Text
+            squealRendering =
+              "INSERT INTO \"emails\" AS \"emails\" SELECT \"id\" AS \"id\", \"user_id\" AS \"user_id\", \"email\" AS \"email\" FROM \"emails\" AS \"emails\" WHERE (\"id\" = ($1 :: int4))"
+          checkStatement squealRendering statement
+
+        it
+          "insert into users_copy select id, name, bio from users where users.id = 'uid1'"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  insert into users_copy
+                  select id, name, bio from users where users.id = 'uid1'
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
+            checkStatement squealRendering statement
+
+    describe "deletes" $ do
+      it "delete from users where true" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from users where true |]
+          squealRendering :: Text
+          squealRendering = "DELETE FROM \"users\" AS \"users\" WHERE TRUE"
+
+        checkStatement squealRendering statement
+
+      it "delete from emails where id = 1" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from emails where id = 1 |]
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
+        checkStatement squealRendering statement
+
+      it "delete from emails where email = haskell(e)" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| delete from emails where email = haskell(e) |]
+          e :: Text
+          e = "foo"
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"emails\" AS \"emails\" WHERE (\"email\" = (E'foo' :: text))"
+        checkStatement squealRendering statement
+
+    describe "updates" $ do
+      it "update users set name = 'new name' where id = 'some-id'" $ do
+        let
+          statement :: Statement DB () ()
+          statement = [ssql| update users set name = 'new name' where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = 'new name', bio = 'new bio' where id = 'some-id'" $ do
+        let
+          statement :: Statement DB () ()
+          statement =
+            [ssql| update users set name = 'new name', bio = 'new bio' where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text), \"bio\" = (E'new bio' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = haskell(n) where id = 'some-id'" $ do
+        let
+          n :: Text
+          n = "new name"
+          statement :: Statement DB () ()
+          statement = [ssql| update users set name = haskell(n) where id = 'some-id' |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = 'new name' where id = 'some-id' returning id" $ do
+        let
+          statement :: Statement DB () (Field "id" Text, ())
+          statement =
+            [ssql| update users set name = 'new name' where id = 'some-id' returning id |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
+        checkStatement squealRendering statement
+
     describe "scalar expressions" $ do
       -- Binary Operators
       it "select id != 'no-such-user' as neq from users" $ do
@@ -634,7 +812,8 @@ main =
           stmt = [ssql| select users.id != 'no-such-user' as neq from users |]
           squealRendering :: Text
           squealRendering =
-            "SELECT (\"users\".\"id\" <> (E'no-such-user' :: text)) AS \"neq\" FROM \"users\" AS \"users\""
+            "SELECT (\"users\".\"id\" <> (E'no-such-user' :: text)) AS "
+              <> "\"neq\" FROM \"users\" AS \"users\""
         checkStatement squealRendering stmt
 
       it "select * from users where id <> 'no-such-user'" $ do
@@ -910,6 +1089,34 @@ main =
             squealRendering = "SELECT * FROM (VALUES (CURRENT_DATE)) AS t (\"today\")"
           checkStatement squealRendering stmt
 
+        it "haskell variables in expressions" $ do
+          let
+            mkStatement
+              :: Text
+              -> Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            mkStatement n =
+              [ssql| select * from users where name = haskell(n) |]
+
+            squealRendering1 :: Text
+            squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
+
+            squealRendering2 :: Text
+            squealRendering2 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Bob' :: text))"
+
+          checkStatement squealRendering1 (mkStatement "Alice")
+          checkStatement squealRendering2 (mkStatement "Bob")
+
       -- PARENS (implicitly tested by complex expressions)
       it "select (id + 1) * 2 as calc from emails" $ do
         let
@@ -1034,6 +1241,158 @@ main =
           squealRendering :: Text
           squealRendering = "SELECT * FROM \"json_test\" AS \"json_test\""
         checkStatement squealRendering statement
+
+      it "select distinct name from users" $ do
+        let
+          statement :: Statement DB () (Field "name" Text, ())
+          statement = [ssql| select distinct name from users |]
+          squealRendering :: Text
+          squealRendering = "SELECT DISTINCT \"name\" AS \"name\" FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select distinct * from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select distinct * from users |]
+          squealRendering :: Text
+          squealRendering = "SELECT DISTINCT * FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select distinct on (employee_id) employee_id, name from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "employee_id" UUID
+                 , ( Field "name" Text
+                   , ()
+                   )
+                 )
+          statement = [ssql| select distinct on (employee_id) employee_id, name from users |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT DISTINCT ON (\"employee_id\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC"
+        checkStatement squealRendering statement
+
+      it "select distinct on (employee_id, name) employee_id, name, id from users" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "employee_id" UUID
+                 , ( Field "name" Text
+                   , ( Field "id" Text
+                     , ()
+                     )
+                   )
+                 )
+          statement =
+            [ssql| select distinct on (employee_id, name) employee_id, name, id from users |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT DISTINCT ON (\"employee_id\", \"name\") \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", \"id\" AS \"id\" FROM \"users\" AS \"users\" ORDER BY \"employee_id\" ASC, \"name\" ASC"
+        checkStatement squealRendering statement
+
+      describe "order by" $ do
+        it "select * from users order by name" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" ASC"
+          checkStatement squealRendering statement
+
+        it "select * from users order by name asc" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name asc |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" ASC"
+          checkStatement squealRendering statement
+
+        it "select * from users order by name desc" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| select * from users order by name desc |]
+            squealRendering :: Text
+            squealRendering = "SELECT * FROM \"users\" AS \"users\" ORDER BY \"name\" DESC"
+          checkStatement squealRendering statement
+
+      describe "having clause" $ do
+        it
+          "select employee_id, count(id) from users group by employee_id having count(id) > 1"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "employee_id" UUID
+                     , ( Field "_col2" Int64 -- Assuming count returns Int64
+                       , ()
+                       )
+                     )
+              statement =
+                [ssql|
+                  select employee_id, count(id)
+                  from users
+                  group by employee_id
+                  having count(id) > 1
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"employee_id\" AS \"employee_id\", count(ALL \"id\") AS \"_col2\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\" HAVING (count(ALL \"id\") > 1)"
+            checkStatement squealRendering statement
 
 
 _printQuery :: (RenderSQL a) => a -> IO ()

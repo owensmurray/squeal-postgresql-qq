@@ -1,4 +1,5 @@
 {-# LANGUAGE GHC2024 #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -8,19 +9,22 @@ module Squeal.QuasiQuotes.Common (
   renderPGTTableRef,
   renderPGTAExpr,
   getIdentText,
+  renderPGTTargeting,
+  renderPGTTargetList,
 ) where
 
+import Control.Applicative (Alternative((<|>)))
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, AppTypeE, ConE, InfixE, LabelE, ListE, LitE, TupE, VarE)
-  , Lit(IntegerL, StringL), TyLit(NumTyLit), Type(LitT), Q
+  , Lit(IntegerL, StringL), TyLit(NumTyLit), Type(LitT), Name, Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(elem, foldl'), Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
-  , Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>)), Show(show)
-  , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, either, error
-  , fromIntegral, id
+  , Foldable(elem, foldl', null), Functor(fmap), Maybe(Just, Nothing)
+  , MonadFail(fail), Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>))
+  , Show(show), Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer
+  , String, any, either, error, fromIntegral, id
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
@@ -474,32 +478,52 @@ renderPGTFuncExpr = \case
 renderPGTFuncApplication :: PGT_AST.FuncApplication -> Q Exp
 renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
   let
-    fnNameStr = case funcName of
-      PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
-      PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
-    squealFn = case Text.toLower (Text.pack fnNameStr) of
-      "coalesce" -> pure $ VarE 'S.coalesce
-      "lower" -> pure $ VarE 'S.lower
-      "char_length" -> pure $ VarE 'S.charLength
-      "character_length" -> pure $ VarE 'S.charLength
-      "upper" -> pure $ VarE 'S.upper
-      "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
-      "now" -> pure $ VarE 'S.now
-      _ -> fail $ "Unsupported function: " <> fnNameStr
+    fnNameStr :: String
+    fnNameStr =
+      case funcName of
+        PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
+        PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
   in
-    case maybeParams of
-      Nothing -> squealFn -- No-argument function
-      Just params -> case params of
-        PGT_AST.NormalFuncApplicationParams _allOrDistinct args _sortClause -> do
-          fn <- squealFn
-          argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
-          pure $ foldl' AppE fn argExps
-        PGT_AST.StarFuncApplicationParams ->
-          -- Specific for count(*)
-          if fnNameStr == "count"
-            then pure $ VarE 'S.countStar
-            else fail "Star argument only supported for COUNT"
-        _ -> fail $ "Unsupported function parameters structure: " <> show params
+    if Text.toLower (Text.pack fnNameStr) == "haskell"
+      then case maybeParams of
+        Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+          case NE.toList args of
+            [ PGT_AST.ExprFuncArgExpr
+                (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+              ] -> do
+                let
+                  varName :: Name
+                  varName = mkName . Text.unpack . getIdentText $ ident
+                pure $ VarE 'S.inline `AppE` VarE varName
+            _ -> fail "haskell() function expects a single variable argument"
+        _ -> fail "haskell() function expects a single variable argument"
+      else
+        let
+          squealFn :: Q Exp
+          squealFn =
+            case Text.toLower (Text.pack fnNameStr) of
+              "coalesce" -> pure $ VarE 'S.coalesce
+              "lower" -> pure $ VarE 'S.lower
+              "char_length" -> pure $ VarE 'S.charLength
+              "character_length" -> pure $ VarE 'S.charLength
+              "upper" -> pure $ VarE 'S.upper
+              "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
+              "now" -> pure $ VarE 'S.now
+              _ -> fail $ "Unsupported function: " <> fnNameStr
+        in
+          case maybeParams of
+            Nothing -> squealFn -- No-argument function
+            Just params -> case params of
+              PGT_AST.NormalFuncApplicationParams _allOrDistinct args _sortClause -> do
+                fn <- squealFn
+                argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
+                pure $ foldl' AppE fn argExps
+              PGT_AST.StarFuncApplicationParams ->
+                -- Specific for count(*)
+                if fnNameStr == "count"
+                  then pure $ VarE 'S.countStar
+                  else fail "Star argument only supported for COUNT"
+              _ -> fail $ "Unsupported function parameters structure: " <> show params
 
 
 renderPGTFuncArgExpr :: PGT_AST.FuncArgExpr -> Q Exp
@@ -549,6 +573,8 @@ renderPGTAexprConst = \case
              )
   PGT_AST.SAexprConst s ->
     VarE 'fromString `AppE` LitE (StringL (Text.unpack s))
+  PGT_AST.BoolAexprConst True -> VarE 'S.true
+  PGT_AST.BoolAexprConst False -> VarE 'S.false
   PGT_AST.NullAexprConst -> VarE 'S.null_
   unsupported -> error $ "Unsupported AexprConst: " <> show unsupported
 
@@ -756,5 +782,153 @@ renderPGTNumeric = \case
   PGT_AST.DecNumeric _ -> VarE 'S.numeric
   PGT_AST.NumericNumeric _ -> VarE 'S.numeric
   PGT_AST.BooleanNumeric -> VarE 'S.bool
+
+
+{- |
+  Translates the `Targeting` clause of a SQL SELECT statement from the
+  `postgresql-syntax` AST (`PGT_AST.Targeting`) into a Squeal representation.
+  The `Targeting` clause defines the list of expressions or columns to be
+  returned by the query (e.g., `*`, `col1`, `col2 AS alias`, `DISTINCT col3`).
+
+  The function returns a Template Haskell `Q` computation that, when run,
+  produces a pair:
+  1. `Exp`: A Template Haskell expression representing the Squeal selection list.
+     This could be `S.Star` for `SELECT *`, or a constructed Squeal expression
+     for a list of target elements (e.g., `expression1 :* expression2 :* S.Nil`).
+  2. `Maybe [PGT_AST.AExpr]`: This field is used to pass along the expressions
+     from a `DISTINCT ON (expr1, expr2, ...)` clause. If the query uses
+     `DISTINCT ON`, this will be `Just` containing the list of `PGT_AST.AExpr`
+     nodes representing `expr1, expr2, ...`. For all other types of targeting
+     (e.g., `SELECT DISTINCT col`, `SELECT col1, col2`, `SELECT *`), this
+     will be `Nothing`.
+
+  The function handles different kinds of targeting:
+  - `PGT_AST.NormalTargeting`: Standard `SELECT col1, col2, ...`
+  - `PGT_AST.AllTargeting`: `SELECT ALL ...` (often equivalent to normal select or `SELECT *`)
+  - `PGT_AST.DistinctTargeting`: `SELECT DISTINCT ...` or `SELECT DISTINCT ON (...) ...`
+
+  Returns (SquealSelectionListExp, Maybe DistinctOnAstExpressions)
+-}
+renderPGTTargeting
+  :: PGT_AST.Targeting
+  -> Q (Exp, Maybe [PGT_AST.AExpr])
+renderPGTTargeting = \case
+  PGT_AST.NormalTargeting targetList -> do
+    selListExp <- renderPGTTargetList targetList
+    pure (selListExp, Nothing)
+  PGT_AST.AllTargeting maybeTargetList -> do
+    selListExp <-
+      case maybeTargetList of
+        Nothing -> pure $ ConE 'S.Star -- SELECT ALL (which is like SELECT *)
+        Just tl -> renderPGTTargetList tl
+    pure (selListExp, Nothing)
+  PGT_AST.DistinctTargeting maybeOnExprs targetList -> do
+    selListExp <- renderPGTTargetList targetList
+    pure (selListExp, fmap NE.toList maybeOnExprs)
+
+
+renderPGTTargetEl :: PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
+renderPGTTargetEl targetEl mOuterAlias idx =
+  let
+    (exprAST, mInternalAlias) = case targetEl of
+      PGT_AST.AliasedExprTargetEl e an -> (e, Just an)
+      PGT_AST.ImplicitlyAliasedExprTargetEl e an -> (e, Just an)
+      PGT_AST.ExprTargetEl e -> (e, Nothing)
+      PGT_AST.AsteriskTargetEl ->
+        ( PGT_AST.CExprAExpr
+            ( PGT_AST.AexprConstCExpr
+                PGT_AST.NullAexprConst
+            )
+        , Nothing -- Placeholder for Star, should be S.Star
+        )
+    finalAliasName = mOuterAlias <|> mInternalAlias
+  in
+    case targetEl of
+      PGT_AST.AsteriskTargetEl -> pure $ ConE 'S.Star
+      _ -> do
+        renderedScalarExp <- renderPGTAExpr exprAST
+        case exprAST of
+          PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr _)
+            | Nothing <- finalAliasName ->
+                pure renderedScalarExp
+          _ -> do
+            let
+              aliasLabelStr =
+                case finalAliasName of
+                  Just ident -> Text.unpack $ getIdentText ident
+                  Nothing -> "_col" <> show idx
+            pure $
+              VarE 'S.as
+                `AppE` renderedScalarExp
+                `AppE` LabelE aliasLabelStr
+
+
+renderPGTTargetList :: PGT_AST.TargetList -> Q Exp
+renderPGTTargetList (item NE.:| items) =
+    if null items && isAsterisk item
+      then
+        pure $ ConE 'S.Star
+      else
+        if null items && isDotStar item
+          then
+            renderPGTTargetElDotStar item
+          else
+            go (item : items) 1
+  where
+    isAsterisk :: PGT_AST.TargetEl -> Bool
+    isAsterisk PGT_AST.AsteriskTargetEl = True
+    isAsterisk _ = False
+
+    isDotStar :: PGT_AST.TargetEl -> Bool
+    isDotStar
+      ( PGT_AST.ExprTargetEl
+          ( PGT_AST.CExprAExpr
+              (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref _ (Just indirection)))
+            )
+        ) =
+        any isAllIndirectionEl (NE.toList indirection)
+    isDotStar _ = False
+
+    isAllIndirectionEl :: PGT_AST.IndirectionEl -> Bool
+    isAllIndirectionEl PGT_AST.AllIndirectionEl = True
+    isAllIndirectionEl _ = False
+
+    renderPGTTargetElDotStar :: PGT_AST.TargetEl -> Q Exp
+    renderPGTTargetElDotStar
+      ( PGT_AST.ExprTargetEl
+          ( PGT_AST.CExprAExpr
+              ( PGT_AST.ColumnrefCExpr
+                  ( PGT_AST.Columnref
+                      qualName
+                      indirectionOpt
+                    )
+                )
+            )
+        ) =
+        case indirectionOpt of
+          Just indirection
+            | any isAllIndirectionEl (NE.toList indirection) ->
+                pure $
+                  ConE 'S.DotStar
+                    `AppE` (LabelE (Text.unpack (getIdentText qualName)))
+          _ ->
+            fail $
+              "renderPGTTargetElDotStar called with non-DotStar "
+                <> "TargetEl structure"
+    renderPGTTargetElDotStar _ =
+      fail "renderPGTTargetElDotStar called with unexpected TargetEl"
+
+    go :: [PGT_AST.TargetEl] -> Int -> Q Exp
+    go [] _ =
+      {- Should not happen with NonEmpty input to renderPGTTargetList -}
+      fail "Empty selection list items in go."
+    go [el] currentIdx = renderPGTTargetEl el Nothing currentIdx
+    go (el : more) currentIdx = do
+      renderedEl <- renderPGTTargetEl el Nothing currentIdx
+      if null more
+        then pure renderedEl
+        else do
+          restRendered <- go more (currentIdx + 1)
+          pure $ ConE 'S.Also `AppE` restRendered `AppE` renderedEl
 
 
