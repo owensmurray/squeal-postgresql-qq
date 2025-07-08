@@ -61,7 +61,14 @@ type Schema =
    ,     "emails" ::: 'Table (EmailsConstraints :=> EmailsColumns)
    , "jsonb_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjsonb])
    ,  "json_test" ::: 'Table ('[] :=> '["data" ::: 'NoDef :=> 'NotNull 'PGjson])
+   , "users_copy" ::: 'Table (UsersCopyConstraints :=> UsersCopyColumns)
    ]
+type UsersCopyColumns =
+  '[ "id"   ::: 'NoDef :=> 'NotNull 'PGtext
+   , "name" ::: 'NoDef :=> 'NotNull 'PGtext
+   , "bio"  ::: 'NoDef :=> 'Null    'PGtext
+   ]
+type UsersCopyConstraints = '[ "pk_users_copy" ::: 'PrimaryKey '["id"] ]
 type DB =
   '[ "public" ::: Schema
    ,  "other" ::: Schema
@@ -681,6 +688,46 @@ main =
             squealRendering :: Text
             squealRendering =
               "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (DEFAULT, (E'foo' :: text), NULL)"
+          checkStatement squealRendering statement
+
+      describe "insert ... select ..." $ do
+        it "insert into emails select id, user_id, email from emails where id = 1" $ do
+          let
+            statement :: Statement DB () ()
+            statement =
+              [ssql|
+                insert into emails
+                select id, user_id, email from emails where id = 1
+              |]
+            squealRendering :: Text
+            squealRendering =
+              "INSERT INTO \"emails\" AS \"emails\" SELECT \"id\" AS \"id\", \"user_id\" AS \"user_id\", \"email\" AS \"email\" FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
+          checkStatement squealRendering statement
+
+        it "insert into emails select id, user_id, email from emails where id = $1" $ do
+          let
+            statement :: Statement DB (Only Int32) ()
+            statement =
+              [ssql|
+                insert into emails
+                select id, user_id, email from emails where id = $1
+              |]
+            squealRendering :: Text
+            squealRendering =
+              "INSERT INTO \"emails\" AS \"emails\" SELECT \"id\" AS \"id\", \"user_id\" AS \"user_id\", \"email\" AS \"email\" FROM \"emails\" AS \"emails\" WHERE (\"id\" = ($1 :: int4))"
+          checkStatement squealRendering statement
+
+        it "insert into users_copy select id, name, bio from users where users.id = 'uid1'" $ do
+          let
+            statement :: Statement DB () ()
+            statement =
+              [ssql|
+                insert into users_copy
+                select id, name, bio from users where users.id = 'uid1'
+              |]
+            squealRendering :: Text
+            squealRendering =
+              "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
           checkStatement squealRendering statement
 
     describe "scalar expressions" $ do
