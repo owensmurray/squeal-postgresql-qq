@@ -855,9 +855,11 @@ renderPGTTargetList (item NE.:| items) =
           else
             go (item : items) 1
   where
+    isAsterisk :: PGT_AST.TargetEl -> Bool
     isAsterisk PGT_AST.AsteriskTargetEl = True
     isAsterisk _ = False
 
+    isDotStar :: PGT_AST.TargetEl -> Bool
     isDotStar
       ( PGT_AST.ExprTargetEl
           ( PGT_AST.CExprAExpr
@@ -867,6 +869,7 @@ renderPGTTargetList (item NE.:| items) =
         any isAllIndirectionEl (NE.toList indirection)
     isDotStar _ = False
 
+    isAllIndirectionEl :: PGT_AST.IndirectionEl -> Bool
     isAllIndirectionEl PGT_AST.AllIndirectionEl = True
     isAllIndirectionEl _ = False
 
