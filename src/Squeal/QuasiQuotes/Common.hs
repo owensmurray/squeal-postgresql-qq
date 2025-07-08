@@ -19,8 +19,8 @@ import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
   , Foldable(elem, foldl'), Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
   , Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>)), Show(show)
-  , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, either, error
-  , fromIntegral, id
+  , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, String, either
+  , error, fromIntegral, id
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
@@ -474,10 +474,12 @@ renderPGTFuncExpr = \case
 renderPGTFuncApplication :: PGT_AST.FuncApplication -> Q Exp
 renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
   let
+    fnNameStr :: String
     fnNameStr =
       case funcName of
         PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
         PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
+    squealFn :: Q Exp
     squealFn =
       case Text.toLower (Text.pack fnNameStr) of
         "coalesce" -> pure $ VarE 'S.coalesce
