@@ -182,7 +182,8 @@ toSquealSimpleSelect simpleSelect maybeSelectLimit maybeForLockingClause =
                           baseFinalTableExpr
                           lockingClauseExps
 
-                selectionTargetExp <- renderPGTTargeting targeting
+                selectionTargetExp <-
+                  renderPGTTargeting targeting
                 pure $
                   VarE 'monoQuery
                     `AppE` ( VarE 'S.select
