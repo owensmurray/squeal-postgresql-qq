@@ -717,18 +717,20 @@ main =
               "INSERT INTO \"emails\" AS \"emails\" SELECT \"id\" AS \"id\", \"user_id\" AS \"user_id\", \"email\" AS \"email\" FROM \"emails\" AS \"emails\" WHERE (\"id\" = ($1 :: int4))"
           checkStatement squealRendering statement
 
-        it "insert into users_copy select id, name, bio from users where users.id = 'uid1'" $ do
-          let
-            statement :: Statement DB () ()
-            statement =
-              [ssql|
-                insert into users_copy
-                select id, name, bio from users where users.id = 'uid1'
-              |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
-          checkStatement squealRendering statement
+        it
+          "insert into users_copy select id, name, bio from users where users.id = 'uid1'"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  insert into users_copy
+                  select id, name, bio from users where users.id = 'uid1'
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
+            checkStatement squealRendering statement
 
     describe "scalar expressions" $ do
       -- Binary Operators
@@ -738,7 +740,8 @@ main =
           stmt = [ssql| select users.id != 'no-such-user' as neq from users |]
           squealRendering :: Text
           squealRendering =
-            "SELECT (\"users\".\"id\" <> (E'no-such-user' :: text)) AS \"neq\" FROM \"users\" AS \"users\""
+            "SELECT (\"users\".\"id\" <> (E'no-such-user' :: text)) AS "
+              <> "\"neq\" FROM \"users\" AS \"users\""
         checkStatement squealRendering stmt
 
       it "select * from users where id <> 'no-such-user'" $ do

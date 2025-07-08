@@ -474,18 +474,20 @@ renderPGTFuncExpr = \case
 renderPGTFuncApplication :: PGT_AST.FuncApplication -> Q Exp
 renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
   let
-    fnNameStr = case funcName of
-      PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
-      PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
-    squealFn = case Text.toLower (Text.pack fnNameStr) of
-      "coalesce" -> pure $ VarE 'S.coalesce
-      "lower" -> pure $ VarE 'S.lower
-      "char_length" -> pure $ VarE 'S.charLength
-      "character_length" -> pure $ VarE 'S.charLength
-      "upper" -> pure $ VarE 'S.upper
-      "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
-      "now" -> pure $ VarE 'S.now
-      _ -> fail $ "Unsupported function: " <> fnNameStr
+    fnNameStr =
+      case funcName of
+        PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
+        PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
+    squealFn =
+      case Text.toLower (Text.pack fnNameStr) of
+        "coalesce" -> pure $ VarE 'S.coalesce
+        "lower" -> pure $ VarE 'S.lower
+        "char_length" -> pure $ VarE 'S.charLength
+        "character_length" -> pure $ VarE 'S.charLength
+        "upper" -> pure $ VarE 'S.upper
+        "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
+        "now" -> pure $ VarE 'S.now
+        _ -> fail $ "Unsupported function: " <> fnNameStr
   in
     case maybeParams of
       Nothing -> squealFn -- No-argument function

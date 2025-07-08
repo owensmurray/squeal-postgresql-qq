@@ -522,40 +522,41 @@ processSelectLimit tableExpr (Just selectLimit) = do
 
 renderPGTLimitClause :: PGT_AST.LimitClause -> Q Exp
 renderPGTLimitClause = \case
-  PGT_AST.LimitLimitClause slValue _mOffsetVal -> case slValue of
-    PGT_AST.ExprSelectLimitValue
-      ( PGT_AST.CExprAExpr
-          ( PGT_AST.FuncCExpr
-              ( PGT_AST.ApplicationFuncExpr
-                  ( PGT_AST.FuncApplication
-                      (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
-                      ( Just
-                          ( PGT_AST.NormalFuncApplicationParams
-                              Nothing
-                              ( PGT_AST.ExprFuncArgExpr
-                                  ( PGT_AST.CExprAExpr
-                                      (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
-                                    )
-                                  NE.:| []
-                                )
-                              Nothing
-                            )
-                        )
-                    )
-                  Nothing
-                  Nothing
-                  Nothing
-                )
-            )
-        ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
-    PGT_AST.ExprSelectLimitValue
-      (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
-        if n >= 0
-          then pure (LitE (IntegerL (fromIntegral n)))
-          else fail $ "LIMIT value must be non-negative: " <> show n
-    PGT_AST.AllSelectLimitValue ->
-      fail "LIMIT ALL not supported in this translation."
-    expr -> fail $ "Unsupported LIMIT expression: " <> show expr
+  PGT_AST.LimitLimitClause slValue _mOffsetVal ->
+    case slValue of
+      PGT_AST.ExprSelectLimitValue
+        ( PGT_AST.CExprAExpr
+            ( PGT_AST.FuncCExpr
+                ( PGT_AST.ApplicationFuncExpr
+                    ( PGT_AST.FuncApplication
+                        (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                        ( Just
+                            ( PGT_AST.NormalFuncApplicationParams
+                                Nothing
+                                ( PGT_AST.ExprFuncArgExpr
+                                    ( PGT_AST.CExprAExpr
+                                        (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing))
+                                      )
+                                    NE.:| []
+                                  )
+                                Nothing
+                              )
+                          )
+                      )
+                    Nothing
+                    Nothing
+                    Nothing
+                  )
+              )
+          ) -> pure $ VarE (mkName (Text.unpack (getIdentText ident)))
+      PGT_AST.ExprSelectLimitValue
+        (PGT_AST.CExprAExpr (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))) ->
+          if n >= 0
+            then pure (LitE (IntegerL (fromIntegral n)))
+            else fail $ "LIMIT value must be non-negative: " <> show n
+      PGT_AST.AllSelectLimitValue ->
+        fail "LIMIT ALL not supported in this translation."
+      expr -> fail $ "Unsupported LIMIT expression: " <> show expr
   PGT_AST.FetchOnlyLimitClause _ mVal _ -> case mVal of
     Just (PGT_AST.NumSelectFetchFirstValue _ (Left n)) ->
       if n >= 0
