@@ -1,4 +1,5 @@
-{-# LANGUAGE GHC2024 #-}
+{-# LANGUAGE GHC2021 #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
@@ -14,6 +15,9 @@ module Squeal.QuasiQuotes.Common (
 ) where
 
 import Control.Applicative (Alternative((<|>)))
+import Control.Monad (when)
+import Data.Foldable (Foldable(elem, foldl', null))
+import Data.Maybe (isJust)
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, AppTypeE, ConE, InfixE, LabelE, ListE, LitE, TupE, VarE)
@@ -21,10 +25,10 @@ import Language.Haskell.TH.Syntax
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(elem, foldl', null), Functor(fmap), Maybe(Just, Nothing)
-  , MonadFail(fail), Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>))
-  , Show(show), Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer
-  , String, any, either, error, fromIntegral, id
+  , Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
+  , Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>)), Show(show)
+  , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, any, either
+  , error, fromIntegral, id
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
@@ -55,7 +59,8 @@ renderPGTTableRef tableRefs = do
 
 renderSingleTableRef :: PGT_AST.TableRef -> Q Exp
 renderSingleTableRef = \case
-  PGT_AST.RelationExprTableRef relationExpr maybeAliasClause _sampleClause ->
+  PGT_AST.RelationExprTableRef relationExpr maybeAliasClause sampleClause -> do
+    when (isJust sampleClause) $ fail "TABLESAMPLE clause is not supported yet."
     renderPGTRelationExprTableRef relationExpr maybeAliasClause
   PGT_AST.JoinTableRef joinedTable maybeAliasClause ->
     -- If `maybeAliasClause` is Just, it means `(JOIN_TABLE) AS alias`.
@@ -120,12 +125,13 @@ renderPGTRelationExprTableRef
 renderPGTRelationExprTableRef relationExpr maybeAliasClause = do
   tableExpr <-
     case relationExpr of
-      PGT_AST.SimpleRelationExpr qualifiedName _isAsterisk ->
+      PGT_AST.SimpleRelationExpr qualifiedName isAsterisk -> do
+        when isAsterisk $ fail "Relation with '*' (e.g. 'table *') is not supported."
         renderPGTQualifiedName qualifiedName
-      PGT_AST.OnlyRelationExpr qualifiedName _areParensPresent ->
+      PGT_AST.OnlyRelationExpr _qualifiedName _areParensPresent -> do
         -- Squeal doesn't have a direct equivalent for ONLY, so we treat it as a normal table for now.
         -- This might need adjustment if ONLY semantics are critical.
-        renderPGTQualifiedName qualifiedName
+        fail "ONLY keyword is not supported."
 
   aliasStr <-
     case maybeAliasClause of
@@ -398,7 +404,8 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
   PGT_AST.NotAExpr expr -> do
     eExp' <- renderPGTAExpr expr
     pure (VarE 'S.not_ `AppE` eExp')
-  PGT_AST.VerbalExprBinOpAExpr left not op right _mEscape -> do
+  PGT_AST.VerbalExprBinOpAExpr left not op right mEscape -> do
+    when (isJust mEscape) $ fail "LIKE with ESCAPE is not supported yet."
     lExp' <- renderPGTAExpr left
     rExp' <- renderPGTAExpr right
     baseOpExp <-
@@ -462,68 +469,95 @@ renderPGTCExpr :: PGT_AST.CExpr -> Q Exp
 renderPGTCExpr = \case
   PGT_AST.AexprConstCExpr aexprConst -> pure $ renderPGTAexprConst aexprConst
   PGT_AST.ColumnrefCExpr columnref -> pure $ renderPGTColumnref columnref
-  PGT_AST.ParamCExpr n _maybeIndirection ->
+  PGT_AST.ParamCExpr n maybeIndirection -> do
+    when (isJust maybeIndirection) $
+      fail "Parameters with indirection (e.g. $1[i]) are not supported."
     pure $ VarE 'S.param `AppTypeE` LitT (NumTyLit (fromIntegral n))
-  PGT_AST.InParensCExpr expr _ -> renderPGTAExpr expr -- Squeal's operator precedence should handle this
+  PGT_AST.InParensCExpr expr maybeIndirection -> do
+    when (isJust maybeIndirection) $
+      fail "Parenthesized expressions with indirection are not supported."
+    renderPGTAExpr expr -- Squeal's operator precedence should handle this
   PGT_AST.FuncCExpr funcExpr -> renderPGTFuncExpr funcExpr
   unsupported -> fail $ "Unsupported CExpr: " <> show unsupported
 
 
 renderPGTFuncExpr :: PGT_AST.FuncExpr -> Q Exp
 renderPGTFuncExpr = \case
-  PGT_AST.ApplicationFuncExpr funcApp _ _ _ -> renderPGTFuncApplication funcApp
+  PGT_AST.ApplicationFuncExpr funcApp maybeWithinGroup maybeFilter maybeOver -> do
+    when (isJust maybeWithinGroup) $ fail "WITHIN GROUP clause is not supported."
+    when (isJust maybeFilter) $ fail "FILTER clause is not supported."
+    when (isJust maybeOver) $ fail "OVER clause is not supported."
+    renderPGTFuncApplication funcApp
   PGT_AST.SubexprFuncExpr funcCommonSubexpr -> renderPGTFuncExprCommonSubexpr funcCommonSubexpr
 
 
 renderPGTFuncApplication :: PGT_AST.FuncApplication -> Q Exp
 renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
-  let
-    fnNameStr :: String
-    fnNameStr =
-      case funcName of
-        PGT_AST.TypeFuncName ident -> Text.unpack (getIdentText ident)
-        PGT_AST.IndirectedFuncName ident _ -> Text.unpack (getIdentText ident) -- Ignoring indirection for now
-  in
-    if Text.toLower (Text.pack fnNameStr) == "haskell"
-      then case maybeParams of
-        Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
-          case NE.toList args of
-            [ PGT_AST.ExprFuncArgExpr
-                (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
-              ] -> do
-                let
-                  varName :: Name
-                  varName = mkName . Text.unpack . getIdentText $ ident
-                pure $ VarE 'S.inline `AppE` VarE varName
-            _ -> fail "haskell() function expects a single variable argument"
-        _ -> fail "haskell() function expects a single variable argument"
-      else
-        let
-          squealFn :: Q Exp
-          squealFn =
-            case Text.toLower (Text.pack fnNameStr) of
-              "coalesce" -> pure $ VarE 'S.coalesce
-              "lower" -> pure $ VarE 'S.lower
-              "char_length" -> pure $ VarE 'S.charLength
-              "character_length" -> pure $ VarE 'S.charLength
-              "upper" -> pure $ VarE 'S.upper
-              "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
-              "now" -> pure $ VarE 'S.now
-              _ -> fail $ "Unsupported function: " <> fnNameStr
-        in
-          case maybeParams of
-            Nothing -> squealFn -- No-argument function
-            Just params -> case params of
-              PGT_AST.NormalFuncApplicationParams _allOrDistinct args _sortClause -> do
-                fn <- squealFn
-                argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
-                pure $ foldl' AppE fn argExps
-              PGT_AST.StarFuncApplicationParams ->
-                -- Specific for count(*)
-                if fnNameStr == "count"
-                  then pure $ VarE 'S.countStar
-                  else fail "Star argument only supported for COUNT"
-              _ -> fail $ "Unsupported function parameters structure: " <> show params
+  case funcName of
+    PGT_AST.IndirectedFuncName{} ->
+      fail "Functions with indirection (e.g. schema.func) are not supported."
+    PGT_AST.TypeFuncName fident ->
+      let
+        fnNameStr = Text.unpack (getIdentText fident)
+      in
+        case Text.toLower (Text.pack fnNameStr) of
+          "inline" ->
+            case maybeParams of
+              Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+                case NE.toList args of
+                  [ PGT_AST.ExprFuncArgExpr
+                      (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+                    ] -> do
+                      let
+                        varName :: Name
+                        varName = mkName . Text.unpack . getIdentText $ ident
+                      pure $ VarE 'S.inline `AppE` VarE varName
+                  _ -> fail "inline() function expects a single variable argument"
+              _ -> fail "inline() function expects a single variable argument"
+          "inline_param" ->
+            case maybeParams of
+              Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+                case NE.toList args of
+                  [ PGT_AST.ExprFuncArgExpr
+                      (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+                    ] -> do
+                      let
+                        varName :: Name
+                        varName = mkName . Text.unpack . getIdentText $ ident
+                      pure $ VarE 'S.inlineParam `AppE` VarE varName
+                  _ -> fail "inline_param() function expects a single variable argument"
+              _ -> fail "inline_param() function expects a single variable argument"
+          otherFnName ->
+            let
+              squealFn :: Q Exp
+              squealFn =
+                case otherFnName of
+                  "coalesce" -> pure $ VarE 'S.coalesce
+                  "lower" -> pure $ VarE 'S.lower
+                  "char_length" -> pure $ VarE 'S.charLength
+                  "character_length" -> pure $ VarE 'S.charLength
+                  "upper" -> pure $ VarE 'S.upper
+                  "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
+                  "now" -> pure $ VarE 'S.now
+                  _ -> fail $ "Unsupported function: " <> fnNameStr
+            in
+              case maybeParams of
+                Nothing -> squealFn -- No-argument function
+                Just params -> case params of
+                  PGT_AST.NormalFuncApplicationParams maybeAllOrDistinct args maybeSortClause -> do
+                    when (isJust maybeAllOrDistinct) $
+                      fail "DISTINCT in function calls is not supported."
+                    when (isJust maybeSortClause) $
+                      fail "ORDER BY in function calls is not supported."
+                    fn <- squealFn
+                    argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
+                    pure $ foldl' AppE fn argExps
+                  PGT_AST.StarFuncApplicationParams ->
+                    -- Specific for count(*)
+                    if fnNameStr == "count"
+                      then pure $ VarE 'S.countStar
+                      else fail "Star argument only supported for COUNT"
+                  _ -> fail $ "Unsupported function parameters structure: " <> show params
 
 
 renderPGTFuncArgExpr :: PGT_AST.FuncArgExpr -> Q Exp
@@ -534,6 +568,8 @@ renderPGTFuncArgExpr = \case
 
 renderPGTFuncExprCommonSubexpr :: PGT_AST.FuncExprCommonSubexpr -> Q Exp
 renderPGTFuncExprCommonSubexpr = \case
+  PGT_AST.CurrentTimestampFuncExprCommonSubexpr (Just _) ->
+    fail "CURRENT_TIMESTAMP with precision is not supported."
   PGT_AST.CurrentTimestampFuncExprCommonSubexpr Nothing -> pure $ VarE 'S.now -- Or S.currentTimestamp
   PGT_AST.CurrentDateFuncExprCommonSubexpr -> pure $ VarE 'S.currentDate
   PGT_AST.CoalesceFuncExprCommonSubexpr exprListNE -> do
@@ -619,11 +655,15 @@ renderPGTQualOp = \case
 
 
 renderPGTTypename :: PGT_AST.Typename -> Q Exp
-renderPGTTypename (PGT_AST.Typename _setof simpleTypename _nullable arrayInfo) = do
+renderPGTTypename (PGT_AST.Typename setof simpleTypename nullable arrayInfo) = do
+  when setof $ fail "SETOF type modifier is not supported."
+  when nullable $ fail "Nullable type modifier '?' is not supported."
   baseTypeExp <- renderPGTSimpleTypename simpleTypename
   case arrayInfo of
     Nothing -> pure baseTypeExp
-    Just (dims, _nullableArray) -> renderPGTArrayDimensions baseTypeExp dims
+    Just (dims, nullableArray) -> do
+      when nullableArray $ fail "Nullable array modifier '?' is not supported."
+      renderPGTArrayDimensions baseTypeExp dims
 
 
 renderPGTArrayDimensions :: Exp -> PGT_AST.TypenameArrayDimensions -> Q Exp
@@ -652,7 +692,9 @@ renderPGTArrayDimensions baseTypeExp = \case
 renderPGTSimpleTypename :: PGT_AST.SimpleTypename -> Q Exp
 renderPGTSimpleTypename = \case
   PGT_AST.GenericTypeSimpleTypename
-    (PGT_AST.GenericType typeFnName _attrs maybeModifiers) ->
+    (PGT_AST.GenericType typeFnName attrs maybeModifiers) -> do
+      when (isJust attrs) $
+        fail "Qualified type names (e.g. schema.my_type) are not supported."
       let
         nameLower = Text.toLower (getIdentText typeFnName)
         extractLength :: Maybe PGT_AST.TypeModifiers -> Q Integer
@@ -678,64 +720,63 @@ renderPGTSimpleTypename = \case
             fail $
               "Unsupported type modifier for " <> Text.unpack nameLower <> ": " <> show other
           Nothing -> pure def
-      in
-        case nameLower of
-          "char" -> do
-            len <- extractLengthOrDefault 1 maybeModifiers
-            pure $ VarE 'S.char `AppTypeE` LitT (NumTyLit len)
-          "character" -> do
-            len <- extractLengthOrDefault 1 maybeModifiers
-            pure $ VarE 'S.character `AppTypeE` LitT (NumTyLit len)
-          "varchar" -> case maybeModifiers of
-            Nothing -> pure $ VarE 'S.text -- varchar without length is text
-            Just _ -> do
-              len <- extractLength maybeModifiers
-              pure $ VarE 'S.varchar `AppTypeE` LitT (NumTyLit len)
-          "character varying" -> case maybeModifiers of
-            Nothing -> pure $ VarE 'S.text -- character varying without length is text
-            Just _ -> do
-              len <- extractLength maybeModifiers
-              pure $ VarE 'S.characterVarying `AppTypeE` LitT (NumTyLit len)
-          "bool" -> pure $ VarE 'S.bool
-          "int2" -> pure $ VarE 'S.int2
-          "smallint" -> pure $ VarE 'S.smallint
-          "int4" -> pure $ VarE 'S.int4
-          "int" -> pure $ VarE 'S.int
-          "integer" -> pure $ VarE 'S.integer
-          "int8" -> pure $ VarE 'S.int8
-          "bigint" -> pure $ VarE 'S.bigint
-          "numeric" -> pure $ VarE 'S.numeric -- Ignoring precision/scale for now
-          "float4" -> pure $ VarE 'S.float4 -- Ignoring precision for now
-          "real" -> pure $ VarE 'S.real
-          "float8" -> pure $ VarE 'S.float8
-          "double precision" -> pure $ VarE 'S.doublePrecision
-          "money" -> pure $ VarE 'S.money
-          "text" -> pure $ VarE 'S.text
-          "bytea" -> pure $ VarE 'S.bytea
-          "timestamp" -> pure $ VarE 'S.timestamp
-          "timestamptz" -> pure $ VarE 'S.timestamptz
-          "timestamp with time zone" -> pure $ VarE 'S.timestampWithTimeZone
-          "date" -> pure $ VarE 'S.date
-          "time" -> pure $ VarE 'S.time
-          "timetz" -> pure $ VarE 'S.timetz
-          "time with time zone" -> pure $ VarE 'S.timeWithTimeZone
-          "interval" -> pure $ VarE 'S.interval
-          "uuid" -> pure $ VarE 'S.uuid
-          "inet" -> pure $ VarE 'S.inet
-          "json" -> pure $ VarE 'S.json
-          "jsonb" -> pure $ VarE 'S.jsonb
-          "tsvector" -> pure $ VarE 'S.tsvector
-          "tsquery" -> pure $ VarE 'S.tsquery
-          "oid" -> pure $ VarE 'S.oid
-          "int4range" -> pure $ VarE 'S.int4range
-          "int8range" -> pure $ VarE 'S.int8range
-          "numrange" -> pure $ VarE 'S.numrange
-          "tsrange" -> pure $ VarE 'S.tsrange
-          "tstzrange" -> pure $ VarE 'S.tstzrange
-          "daterange" -> pure $ VarE 'S.daterange
-          "record" -> pure $ VarE 'S.record
-          other -> fail $ "Unsupported generic type name: " <> Text.unpack other
-  PGT_AST.NumericSimpleTypename numeric -> pure $ renderPGTNumeric numeric
+      case nameLower of
+        "char" -> do
+          len <- extractLengthOrDefault 1 maybeModifiers
+          pure $ VarE 'S.char `AppTypeE` LitT (NumTyLit len)
+        "character" -> do
+          len <- extractLengthOrDefault 1 maybeModifiers
+          pure $ VarE 'S.character `AppTypeE` LitT (NumTyLit len)
+        "varchar" -> case maybeModifiers of
+          Nothing -> pure $ VarE 'S.text -- varchar without length is text
+          Just _ -> do
+            len <- extractLength maybeModifiers
+            pure $ VarE 'S.varchar `AppTypeE` LitT (NumTyLit len)
+        "character varying" -> case maybeModifiers of
+          Nothing -> pure $ VarE 'S.text -- character varying without length is text
+          Just _ -> do
+            len <- extractLength maybeModifiers
+            pure $ VarE 'S.characterVarying `AppTypeE` LitT (NumTyLit len)
+        "bool" -> pure $ VarE 'S.bool
+        "int2" -> pure $ VarE 'S.int2
+        "smallint" -> pure $ VarE 'S.smallint
+        "int4" -> pure $ VarE 'S.int4
+        "int" -> pure $ VarE 'S.int
+        "integer" -> pure $ VarE 'S.integer
+        "int8" -> pure $ VarE 'S.int8
+        "bigint" -> pure $ VarE 'S.bigint
+        "numeric" -> pure $ VarE 'S.numeric -- Ignoring precision/scale for now
+        "float4" -> pure $ VarE 'S.float4 -- Ignoring precision for now
+        "real" -> pure $ VarE 'S.real
+        "float8" -> pure $ VarE 'S.float8
+        "double precision" -> pure $ VarE 'S.doublePrecision
+        "money" -> pure $ VarE 'S.money
+        "text" -> pure $ VarE 'S.text
+        "bytea" -> pure $ VarE 'S.bytea
+        "timestamp" -> pure $ VarE 'S.timestamp
+        "timestamptz" -> pure $ VarE 'S.timestamptz
+        "timestamp with time zone" -> pure $ VarE 'S.timestampWithTimeZone
+        "date" -> pure $ VarE 'S.date
+        "time" -> pure $ VarE 'S.time
+        "timetz" -> pure $ VarE 'S.timetz
+        "time with time zone" -> pure $ VarE 'S.timeWithTimeZone
+        "interval" -> pure $ VarE 'S.interval
+        "uuid" -> pure $ VarE 'S.uuid
+        "inet" -> pure $ VarE 'S.inet
+        "json" -> pure $ VarE 'S.json
+        "jsonb" -> pure $ VarE 'S.jsonb
+        "tsvector" -> pure $ VarE 'S.tsvector
+        "tsquery" -> pure $ VarE 'S.tsquery
+        "oid" -> pure $ VarE 'S.oid
+        "int4range" -> pure $ VarE 'S.int4range
+        "int8range" -> pure $ VarE 'S.int8range
+        "numrange" -> pure $ VarE 'S.numrange
+        "tsrange" -> pure $ VarE 'S.tsrange
+        "tstzrange" -> pure $ VarE 'S.tstzrange
+        "daterange" -> pure $ VarE 'S.daterange
+        "record" -> pure $ VarE 'S.record
+        other -> fail $ "Unsupported generic type name: " <> Text.unpack other
+  PGT_AST.NumericSimpleTypename numeric -> renderPGTNumeric numeric
   PGT_AST.BitSimpleTypename (PGT_AST.Bit _varying _maybeLength) ->
     -- PostgreSQL's BIT type without length is BIT(1). BIT VARYING without length is unlimited.
     -- Squeal's `char` and `varchar` are for text, not bit strings.
@@ -758,30 +799,41 @@ renderPGTSimpleTypename = \case
       PGT_AST.NcharCharacter False -> pure $ VarE 'S.char `AppTypeE` LitT (NumTyLit 1) -- NCHAR (synonym for NATIONAL CHAR) -> char(1)
       PGT_AST.NcharCharacter True -> pure $ VarE 'S.text -- NCHAR VARYING -> text
   PGT_AST.ConstDatetimeSimpleTypename dt -> case dt of
-    PGT_AST.TimestampConstDatetime _precision maybeTimezone ->
+    PGT_AST.TimestampConstDatetime precision maybeTimezone -> do
+      when (isJust precision) $ fail "TIMESTAMP with precision is not supported."
       pure $ case maybeTimezone of
         Just False -> VarE 'S.timestampWithTimeZone -- WITH TIME ZONE
         _ -> VarE 'S.timestamp -- WITHOUT TIME ZONE or unspecified
-    PGT_AST.TimeConstDatetime _precision maybeTimezone ->
+    PGT_AST.TimeConstDatetime precision maybeTimezone -> do
+      when (isJust precision) $ fail "TIME with precision is not supported."
       pure $ case maybeTimezone of
         Just False -> VarE 'S.timeWithTimeZone -- WITH TIME ZONE
         _ -> VarE 'S.time -- WITHOUT TIME ZONE or unspecified
-  PGT_AST.ConstIntervalSimpleTypename _ -> pure $ VarE 'S.interval -- Ignoring interval qualifiers for now
+  PGT_AST.ConstIntervalSimpleTypename (Left (Just _)) ->
+    fail "INTERVAL with qualifiers is not supported."
+  PGT_AST.ConstIntervalSimpleTypename (Left Nothing) ->
+    pure $ VarE 'S.interval
+  PGT_AST.ConstIntervalSimpleTypename (Right _) ->
+    fail "INTERVAL with integer literal is not supported in this context."
 
 
-renderPGTNumeric :: PGT_AST.Numeric -> Exp
+renderPGTNumeric :: PGT_AST.Numeric -> Q Exp
 renderPGTNumeric = \case
-  PGT_AST.IntNumeric -> VarE 'S.int
-  PGT_AST.IntegerNumeric -> VarE 'S.integer
-  PGT_AST.SmallintNumeric -> VarE 'S.smallint
-  PGT_AST.BigintNumeric -> VarE 'S.bigint
-  PGT_AST.RealNumeric -> VarE 'S.real
-  PGT_AST.FloatNumeric _ -> VarE 'S.float4 -- Ignoring precision for float(p) for now
-  PGT_AST.DoublePrecisionNumeric -> VarE 'S.doublePrecision
-  PGT_AST.DecimalNumeric _ -> VarE 'S.numeric -- Ignoring precision/scale for decimal/numeric for now
-  PGT_AST.DecNumeric _ -> VarE 'S.numeric
-  PGT_AST.NumericNumeric _ -> VarE 'S.numeric
-  PGT_AST.BooleanNumeric -> VarE 'S.bool
+  PGT_AST.IntNumeric -> pure $ VarE 'S.int
+  PGT_AST.IntegerNumeric -> pure $ VarE 'S.integer
+  PGT_AST.SmallintNumeric -> pure $ VarE 'S.smallint
+  PGT_AST.BigintNumeric -> pure $ VarE 'S.bigint
+  PGT_AST.RealNumeric -> pure $ VarE 'S.real
+  PGT_AST.FloatNumeric (Just _) -> fail "FLOAT with precision is not supported."
+  PGT_AST.FloatNumeric Nothing -> pure $ VarE 'S.float4
+  PGT_AST.DoublePrecisionNumeric -> pure $ VarE 'S.doublePrecision
+  PGT_AST.DecimalNumeric (Just _) -> fail "DECIMAL with precision/scale is not supported."
+  PGT_AST.DecimalNumeric Nothing -> pure $ VarE 'S.numeric
+  PGT_AST.DecNumeric (Just _) -> fail "DEC with precision/scale is not supported."
+  PGT_AST.DecNumeric Nothing -> pure $ VarE 'S.numeric
+  PGT_AST.NumericNumeric (Just _) -> fail "NUMERIC with precision/scale is not supported."
+  PGT_AST.NumericNumeric Nothing -> pure $ VarE 'S.numeric
+  PGT_AST.BooleanNumeric -> pure $ VarE 'S.bool
 
 
 {- |

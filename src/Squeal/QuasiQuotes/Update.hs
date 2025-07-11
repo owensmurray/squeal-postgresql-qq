@@ -9,6 +9,8 @@ module Squeal.QuasiQuotes.Update (
 ) where
 
 import Data.Text (Text)
+import Control.Monad (when)
+import Data.Maybe (isJust)
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Prelude
   ( Applicative(pure), Foldable(foldr), Maybe(Just, Nothing), MonadFail(fail)
@@ -26,13 +28,15 @@ import qualified Squeal.PostgreSQL as S
 toSquealUpdate :: PGT_AST.UpdateStmt -> Q Exp
 toSquealUpdate
   ( PGT_AST.UpdateStmt
-      _maybeWithClause
+      maybeWithClause
       relationExprOptAlias
       setClauseList
       maybeFromClause
       maybeWhereClause
       maybeReturningClause
     ) = do
+    when (isJust maybeWithClause) $
+      fail "WITH clauses are not supported in UPDATE statements yet."
     targetTableExp <- renderPGTRelationExprOptAlias' relationExprOptAlias
 
     setClauseExp <- renderPGTSetClauseList setClauseList
@@ -111,10 +115,10 @@ renderPGTSetClauseList setClauses = do
 
 renderPGTSetClause :: PGT_AST.SetClause -> Q Exp
 renderPGTSetClause = \case
-  PGT_AST.TargetSetClause setTarget aExpr -> do
-    let
-      colNameStr = case setTarget of
-        PGT_AST.SetTarget colId _maybeIndirection -> Text.unpack (getIdentText colId)
+  PGT_AST.TargetSetClause (PGT_AST.SetTarget colId maybeIndirection) aExpr -> do
+    when (isJust maybeIndirection) $
+      fail "UPDATE SET with indirection (e.g., array access) is not supported."
+    let colNameStr = Text.unpack (getIdentText colId)
     renderedExpr <- renderPGTAExpr aExpr
     pure $
       VarE 'S.as

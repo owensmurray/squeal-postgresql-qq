@@ -48,20 +48,6 @@ import qualified Squeal.PostgreSQL as Squeal
 
 
 {- FOURMOLU_DISABLE -}
-{- |
-  Given an Squeal row specification, produce a corresponding haskell
-  tuple type of the form:
-
-  > (Field name1 type1,
-  > (Field name2 type2,
-  > (Field name3 type3,
-  > <continue nesting>,
-  > ()))...)
-
-  where the "name<N>" are phantom types of kind `Symbol`, which provide
-  the name of the corresponding column, and types "type<N>" are whatever
-  appropriate haskell type represents the postgres column type.
--}
 type family RowType a = b | b -> a where
   {-
     It would be more convenient to use a helper type family here that

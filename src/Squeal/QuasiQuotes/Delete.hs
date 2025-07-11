@@ -8,6 +8,8 @@ module Squeal.QuasiQuotes.Delete (
   toSquealDelete,
 ) where
 
+import Control.Monad (when)
+import Data.Maybe (isJust)
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Prelude
   ( Applicative(pure), Maybe(Just, Nothing), MonadFail(fail), ($), (<$>)
@@ -24,13 +26,14 @@ import qualified Squeal.PostgreSQL as S
 toSquealDelete :: PGT_AST.DeleteStmt -> Q Exp
 toSquealDelete
   ( PGT_AST.DeleteStmt
-      _maybeWithClause
+      maybeWithClause
       relationExprOptAlias
       maybeUsingClause
       maybeWhereClause
       maybeReturningClause
     ) = do
-    -- withClause is not supported yet
+    when (isJust maybeWithClause) $
+      fail "WITH clauses are not supported in DELETE statements yet."
     -- whereOrCurrentClause with cursor is not supported yet
 
     targetTableExp <- renderPGTRelationExprOptAlias' relationExprOptAlias
@@ -53,14 +56,13 @@ toSquealDelete
         Nothing -> pure $ ConE 'S.Returning_ `AppE` ConE 'S.Nil
         Just returningClause -> AppE (ConE 'S.Returning) <$> renderPGTTargetList returningClause
 
-    pure $
-      VarE 'S.manipulation
-        `AppE` ( VarE 'S.deleteFrom
-                   `AppE` targetTableExp
-                   `AppE` usingClauseExp
-                   `AppE` whereConditionExp
-                   `AppE` returningClauseExp
-               )
+    pure
+      ( VarE 'S.deleteFrom
+          `AppE` targetTableExp
+          `AppE` usingClauseExp
+          `AppE` whereConditionExp
+          `AppE` returningClauseExp
+      )
 
 
 renderPGTRelationExprOptAlias' :: PGT_AST.RelationExprOptAlias -> Q Exp

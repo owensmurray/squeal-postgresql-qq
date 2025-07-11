@@ -21,8 +21,8 @@ import Data.UUID (UUID)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Prelude
-  ( Applicative(pure), Eq((==)), MonadFail(fail), Semigroup((<>)), Show(show)
-  , ($), (.), Bool, IO, Maybe, putStrLn
+  ( Applicative(pure), Eq((==)), Maybe(Just, Nothing), MonadFail(fail)
+  , Semigroup((<>)), Show(show), ($), (.), Bool, IO, putStrLn
   )
 import Squeal.PostgreSQL
   ( NullType(NotNull, Null), Optionality(Def, NoDef)
@@ -302,7 +302,7 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 3"
         checkStatement squealRendering statement
 
-      it "select * from users limit haskell(lim)" $ do
+      it "select * from users limit inline(lim)" $ do
         let
           mkStatement
             :: Word64
@@ -319,7 +319,7 @@ main =
                    )
                  )
           mkStatement lim =
-            [ssql| select * from users limit haskell(lim) |]
+            [ssql| select * from users limit inline(lim) |]
 
           squealRendering1 :: Text
           squealRendering1 = "SELECT * FROM \"users\" AS \"users\" LIMIT 10"
@@ -330,7 +330,7 @@ main =
         checkStatement squealRendering1 (mkStatement 10)
         checkStatement squealRendering2 (mkStatement 20)
 
-      it "select * from users offset haskell(off)" $ do
+      it "select * from users offset inline(off)" $ do
         let
           mkStatement
             :: Word64
@@ -347,7 +347,7 @@ main =
                    )
                  )
           mkStatement off =
-            [ssql| select * from users offset haskell(off) |]
+            [ssql| select * from users offset inline(off) |]
 
           squealRendering1 :: Text
           squealRendering1 = "SELECT * FROM \"users\" AS \"users\" OFFSET 5"
@@ -425,14 +425,47 @@ main =
                    )
             statement =
               [ssql|
-              select users.id
-              from users
-              left outer join emails
-              on emails.user_id = users.id
-            |]
+                select users.id
+                from users
+                left outer join emails
+                on emails.user_id = users.id
+              |]
             squealRendering :: Text
             squealRendering =
               "SELECT \"users\".\"id\" AS \"id\" FROM \"users\" AS \"users\" LEFT OUTER JOIN \"emails\" AS \"emails\" ON (\"emails\".\"user_id\" = \"users\".\"id\")"
+          checkStatement squealRendering statement
+
+      it
+        "select * from users left outer join emails on users.id == emails.user_id"
+        $ do
+          let
+            targetEmail :: Text
+            targetEmail = "foo@bar.com"
+
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "email" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+            statement =
+              [ssql|
+                select users.id, users.name, emails.email
+                from users
+                left outer join emails
+                on emails.user_id = users.id
+                where emails.email = inline("targetEmail")
+              |]
+
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"users\".\"id\" AS \"id\", \"users\".\"name\" AS \"name\", \"emails\".\"email\" AS \"email\" FROM \"users\" AS \"users\" LEFT OUTER JOIN \"emails\" AS \"emails\" ON (\"emails\".\"user_id\" = \"users\".\"id\") WHERE (\"emails\".\"email\" = (E'foo@bar.com' :: text))"
+
           checkStatement squealRendering statement
 
       it "select 'text_val'" $ do
@@ -580,6 +613,25 @@ main =
           squealRendering =
             "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, ($2 :: text), ($1 :: text))"
         checkStatement squealRendering statement
+
+      it
+        "insert into emails (id, user_id, email) values (inline(i), inline(uid), inline(e))"
+        $ do
+          let
+            mkStatement :: Int32 -> Text -> Maybe Text -> Statement DB () ()
+            mkStatement i uid e =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (inline(i), inline(uid), inline_param(e))
+              |]
+
+          checkStatement
+            "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES ((1 :: int4), (E'user-1' :: text), NULL)"
+            (mkStatement 1 "user-1" Nothing)
+          checkStatement
+            "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES ((1 :: int4), (E'user-1' :: text), (E'foo@bar.com' :: text))"
+            (mkStatement 1 "user-1" (Just "foo@bar.com"))
 
       describe "default keyword" $ do
         it "insert into emails (id, user_id, email) values (default, 'foo', 'bar')" $ do
@@ -733,6 +785,52 @@ main =
                 "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
             checkStatement squealRendering statement
 
+      describe "returning clause" $ do
+        it
+          "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') returning id"
+          $ do
+            let
+              statement
+                :: Statement DB () (Field "id" Int32, ())
+              statement =
+                [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (1, 'user-1', 'foo@bar')
+                returning id
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING \"id\" AS \"id\""
+            checkStatement squealRendering statement
+
+        it
+          "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') returning *"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "id" Int32
+                     , ( Field "user_id" Text
+                       , ( Field "email" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (1, 'user-1', 'foo@bar')
+                returning *
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING *"
+            checkStatement squealRendering statement
+
     describe "deletes" $ do
       it "delete from users where true" $ do
         let
@@ -752,15 +850,24 @@ main =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
         checkStatement squealRendering statement
 
-      it "delete from emails where email = haskell(e)" $ do
+      it "delete from emails where email = inline(e)" $ do
         let
           statement :: Statement DB () ()
-          statement = [ssql| delete from emails where email = haskell(e) |]
+          statement = [ssql| delete from emails where email = inline(e) |]
           e :: Text
           e = "foo"
           squealRendering :: Text
           squealRendering =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"email\" = (E'foo' :: text))"
+        checkStatement squealRendering statement
+
+      it "delete from users where id = 'some-id' returning id" $ do
+        let
+          statement :: Statement DB () (Field "id" Text, ())
+          statement = [ssql| delete from users where id = 'some-id' returning id |]
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
 
     describe "updates" $ do
@@ -783,12 +890,12 @@ main =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text), \"bio\" = (E'new bio' :: text) WHERE (\"id\" = (E'some-id' :: text))"
         checkStatement squealRendering statement
 
-      it "update users set name = haskell(n) where id = 'some-id'" $ do
+      it "update users set name = inline(n) where id = 'some-id'" $ do
         let
           n :: Text
           n = "new name"
           statement :: Statement DB () ()
-          statement = [ssql| update users set name = haskell(n) where id = 'some-id' |]
+          statement = [ssql| update users set name = inline(n) where id = 'some-id' |]
           squealRendering :: Text
           squealRendering =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
@@ -1105,8 +1212,8 @@ main =
                        )
                      )
                    )
-            mkStatement n =
-              [ssql| select * from users where name = haskell(n) |]
+            mkStatement someName =
+              [ssql| select * from users where name = inline("someName") |]
 
             squealRendering1 :: Text
             squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
