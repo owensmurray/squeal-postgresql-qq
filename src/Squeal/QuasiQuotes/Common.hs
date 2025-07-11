@@ -500,24 +500,25 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
       let
         fnNameStr = Text.unpack (getIdentText fident)
       in
-        if Text.toLower (Text.pack fnNameStr) == "haskell"
-          then case maybeParams of
-            Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
-              case NE.toList args of
-                [ PGT_AST.ExprFuncArgExpr
-                    (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
-                  ] -> do
-                    let
-                      varName :: Name
-                      varName = mkName . Text.unpack . getIdentText $ ident
-                    pure $ VarE 'S.inline `AppE` VarE varName
-                _ -> fail "haskell() function expects a single variable argument"
-            _ -> fail "haskell() function expects a single variable argument"
-          else
+        case Text.toLower (Text.pack fnNameStr) of
+          "haskell" ->
+            case maybeParams of
+              Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+                case NE.toList args of
+                  [ PGT_AST.ExprFuncArgExpr
+                      (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+                    ] -> do
+                      let
+                        varName :: Name
+                        varName = mkName . Text.unpack . getIdentText $ ident
+                      pure $ VarE 'S.inline `AppE` VarE varName
+                  _ -> fail "haskell() function expects a single variable argument"
+              _ -> fail "haskell() function expects a single variable argument"
+          otherFnName ->
             let
               squealFn :: Q Exp
               squealFn =
-                case Text.toLower (Text.pack fnNameStr) of
+                case otherFnName of
                   "coalesce" -> pure $ VarE 'S.coalesce
                   "lower" -> pure $ VarE 'S.lower
                   "char_length" -> pure $ VarE 'S.charLength
