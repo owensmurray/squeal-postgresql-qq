@@ -77,9 +77,9 @@ toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLocki
             && isNothing maybeSelectLimit
             && isNothing maybeForLockingClause
         )
-        $ fail $
-          "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
-            <> "in this translation yet."
+        $ fail
+        $ "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
+          <> "in this translation yet."
       renderedValues <- renderValuesClauseToNP valuesClause
       pure $ VarE 'S.values_ `AppE` renderedValues
     PGT_AST.NormalSimpleSelect
