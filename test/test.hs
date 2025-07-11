@@ -302,7 +302,7 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" LIMIT 3"
         checkStatement squealRendering statement
 
-      it "select * from users limit haskell(lim)" $ do
+      it "select * from users limit inline(lim)" $ do
         let
           mkStatement
             :: Word64
@@ -319,7 +319,7 @@ main =
                    )
                  )
           mkStatement lim =
-            [ssql| select * from users limit haskell(lim) |]
+            [ssql| select * from users limit inline(lim) |]
 
           squealRendering1 :: Text
           squealRendering1 = "SELECT * FROM \"users\" AS \"users\" LIMIT 10"
@@ -330,7 +330,7 @@ main =
         checkStatement squealRendering1 (mkStatement 10)
         checkStatement squealRendering2 (mkStatement 20)
 
-      it "select * from users offset haskell(off)" $ do
+      it "select * from users offset inline(off)" $ do
         let
           mkStatement
             :: Word64
@@ -347,7 +347,7 @@ main =
                    )
                  )
           mkStatement off =
-            [ssql| select * from users offset haskell(off) |]
+            [ssql| select * from users offset inline(off) |]
 
           squealRendering1 :: Text
           squealRendering1 = "SELECT * FROM \"users\" AS \"users\" OFFSET 5"
@@ -798,10 +798,10 @@ main =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
         checkStatement squealRendering statement
 
-      it "delete from emails where email = haskell(e)" $ do
+      it "delete from emails where email = inline(e)" $ do
         let
           statement :: Statement DB () ()
-          statement = [ssql| delete from emails where email = haskell(e) |]
+          statement = [ssql| delete from emails where email = inline(e) |]
           e :: Text
           e = "foo"
           squealRendering :: Text
@@ -838,12 +838,12 @@ main =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text), \"bio\" = (E'new bio' :: text) WHERE (\"id\" = (E'some-id' :: text))"
         checkStatement squealRendering statement
 
-      it "update users set name = haskell(n) where id = 'some-id'" $ do
+      it "update users set name = inline(n) where id = 'some-id'" $ do
         let
           n :: Text
           n = "new name"
           statement :: Statement DB () ()
-          statement = [ssql| update users set name = haskell(n) where id = 'some-id' |]
+          statement = [ssql| update users set name = inline(n) where id = 'some-id' |]
           squealRendering :: Text
           squealRendering =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
@@ -1161,7 +1161,7 @@ main =
                      )
                    )
             mkStatement someName =
-              [ssql| select * from users where name = haskell("someName") |]
+              [ssql| select * from users where name = inline("someName") |]
 
             squealRendering1 :: Text
             squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"

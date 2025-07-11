@@ -404,7 +404,7 @@ renderPGTLimitClause = \case
             ( PGT_AST.FuncCExpr
                 ( PGT_AST.ApplicationFuncExpr
                     ( PGT_AST.FuncApplication
-                        (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                        (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "inline"))
                         ( Just
                             ( PGT_AST.NormalFuncApplicationParams
                                 Nothing
@@ -443,7 +443,7 @@ renderPGTOffsetClause = \case
         ( PGT_AST.FuncCExpr
             ( PGT_AST.ApplicationFuncExpr
                 ( PGT_AST.FuncApplication
-                    (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "haskell"))
+                    (PGT_AST.TypeFuncName (PGT_AST.UnquotedIdent "inline"))
                     ( Just
                         ( PGT_AST.NormalFuncApplicationParams
                             Nothing

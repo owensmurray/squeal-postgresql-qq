@@ -501,7 +501,7 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
         fnNameStr = Text.unpack (getIdentText fident)
       in
         case Text.toLower (Text.pack fnNameStr) of
-          "haskell" ->
+          "inline" ->
             case maybeParams of
               Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
                 case NE.toList args of
@@ -512,8 +512,8 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
                         varName :: Name
                         varName = mkName . Text.unpack . getIdentText $ ident
                       pure $ VarE 'S.inline `AppE` VarE varName
-                  _ -> fail "haskell() function expects a single variable argument"
-              _ -> fail "haskell() function expects a single variable argument"
+                  _ -> fail "inline() function expects a single variable argument"
+              _ -> fail "inline() function expects a single variable argument"
           otherFnName ->
             let
               squealFn :: Q Exp
