@@ -1160,8 +1160,8 @@ main =
                        )
                      )
                    )
-            mkStatement n =
-              [ssql| select * from users where name = haskell(n) |]
+            mkStatement someName =
+              [ssql| select * from users where name = haskell("someName") |]
 
             squealRendering1 :: Text
             squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
