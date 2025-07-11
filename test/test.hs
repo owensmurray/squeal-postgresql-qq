@@ -809,6 +809,15 @@ main =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"email\" = (E'foo' :: text))"
         checkStatement squealRendering statement
 
+      it "delete from users where id = 'some-id' returning id" $ do
+        let
+          statement :: Statement DB () (Field "id" Text, ())
+          statement = [ssql| delete from users where id = 'some-id' returning id |]
+          squealRendering :: Text
+          squealRendering =
+            "DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
+        checkStatement squealRendering statement
+
     describe "updates" $ do
       it "update users set name = 'new name' where id = 'some-id'" $ do
         let

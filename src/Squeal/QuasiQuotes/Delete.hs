@@ -53,14 +53,13 @@ toSquealDelete
         Nothing -> pure $ ConE 'S.Returning_ `AppE` ConE 'S.Nil
         Just returningClause -> AppE (ConE 'S.Returning) <$> renderPGTTargetList returningClause
 
-    pure $
-      VarE 'S.manipulation
-        `AppE` ( VarE 'S.deleteFrom
-                   `AppE` targetTableExp
-                   `AppE` usingClauseExp
-                   `AppE` whereConditionExp
-                   `AppE` returningClauseExp
-               )
+    pure
+      ( VarE 'S.deleteFrom
+          `AppE` targetTableExp
+          `AppE` usingClauseExp
+          `AppE` whereConditionExp
+          `AppE` returningClauseExp
+      )
 
 
 renderPGTRelationExprOptAlias' :: PGT_AST.RelationExprOptAlias -> Q Exp

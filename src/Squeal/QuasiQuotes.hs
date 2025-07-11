@@ -62,8 +62,9 @@ toSquealStatement = \case
   PGT_AST.UpdatePreparableStmt stmt -> do
     manipExp <- toSquealUpdate stmt
     pure $ VarE 'monoManipulation `AppE` manipExp
-  PGT_AST.DeletePreparableStmt stmt ->
-    toSquealDelete stmt
+  PGT_AST.DeletePreparableStmt stmt -> do
+    manipExp <- toSquealDelete stmt
+    pure $ VarE 'monoManipulation `AppE` manipExp
   unsupported ->
     error $ "Unsupported statement: " <> show unsupported
 
