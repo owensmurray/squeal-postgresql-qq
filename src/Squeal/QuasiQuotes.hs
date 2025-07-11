@@ -56,11 +56,14 @@ toSquealStatement = \case
   PGT_AST.SelectPreparableStmt theQuery -> do
     queryExp <- toSquealQuery theQuery
     pure $ VarE 'monoQuery `AppE` queryExp
-  PGT_AST.InsertPreparableStmt stmt -> toSquealInsert stmt
+  PGT_AST.InsertPreparableStmt stmt -> do
+    manipExp <- toSquealInsert stmt
+    pure $ VarE 'monoManipulation `AppE` manipExp
   PGT_AST.UpdatePreparableStmt stmt -> do
     manipExp <- toSquealUpdate stmt
     pure $ VarE 'monoManipulation `AppE` manipExp
-  PGT_AST.DeletePreparableStmt stmt -> toSquealDelete stmt
+  PGT_AST.DeletePreparableStmt stmt ->
+    toSquealDelete stmt
   unsupported ->
     error $ "Unsupported statement: " <> show unsupported
 

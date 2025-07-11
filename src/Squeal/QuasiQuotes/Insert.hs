@@ -30,9 +30,9 @@ toSquealInsert
       insertTarget
       insertRest
       _maybeOnConflict
-      _maybeReturningClause
+      maybeReturningClause
     ) = do
-    insertManipulation <-
+    insertBody <-
       case insertRest of
         PGT_AST.SelectInsertRest maybeInsertColumnList _maybeOverrideKind selectStmt -> do
           queryClauseExp <-
@@ -56,13 +56,66 @@ toSquealInsert
                   Nothing -> do
                     squealQueryExp <- toSquealQuery selectStmt -- from Squeal.QuasiQuotes.Query
                     pure (ConE 'S.Subquery `AppE` squealQueryExp)
-          pure $
-            VarE 'S.insertInto_
-              `AppE` renderPGTInsertTarget insertTarget
-              `AppE` queryClauseExp
+          let
+            table = renderPGTInsertTarget insertTarget
+          case maybeReturningClause of
+            Nothing ->
+              pure $ VarE 'S.insertInto_ `AppE` table `AppE` queryClauseExp
+            Just (NE.toList -> [PGT_AST.AsteriskTargetEl]) -> do
+              let
+                returning = ConE 'S.Returning `AppE` ConE 'S.Star
+              pure $
+                VarE 'S.insertInto
+                  `AppE` table
+                  `AppE` queryClauseExp
+                  `AppE` ConE 'S.OnConflictDoRaise
+                  `AppE` returning
+            Just targetList -> do
+              returningProj <- renderTargetList (NE.toList targetList)
+              let
+                returning = ConE 'S.Returning `AppE` (ConE 'S.List `AppE` returningProj)
+              pure $
+                VarE 'S.insertInto
+                  `AppE` table
+                  `AppE` queryClauseExp
+                  `AppE` ConE 'S.OnConflictDoRaise
+                  `AppE` returning
         PGT_AST.DefaultValuesInsertRest ->
           fail "INSERT INTO ... DEFAULT VALUES is not yet supported by Squeal-QQ."
-    pure $ VarE 'S.manipulation `AppE` insertManipulation
+
+    pure insertBody
+
+
+renderTargetList :: [PGT_AST.TargetEl] -> Q Exp
+renderTargetList targetEls = do
+  exps <- mapM renderTargetEl targetEls
+  pure $
+    foldr
+      (\h t -> ConE '(S.:*) `AppE` h `AppE` t)
+      (ConE 'S.Nil)
+      exps
+
+
+renderTargetEl :: PGT_AST.TargetEl -> Q Exp
+renderTargetEl = \case
+  PGT_AST.ExprTargetEl expr -> do
+    exprExp <- renderPGTAExpr expr
+    case expr of
+      PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)) ->
+        let
+          colName = getIdentText ident
+        in
+          pure $ VarE 'S.as `AppE` exprExp `AppE` LabelE (Text.unpack colName)
+      _ ->
+        fail
+          "Returning expression without an alias is not supported for this expression type. Please add an alias."
+  PGT_AST.AliasedExprTargetEl expr alias -> do
+    exprExp <- renderPGTAExpr expr
+    pure $
+      VarE 'S.as `AppE` exprExp `AppE` LabelE (Text.unpack (getIdentText alias))
+  PGT_AST.AsteriskTargetEl -> fail "should be handled by toSquealInsert"
+  PGT_AST.ImplicitlyAliasedExprTargetEl{} ->
+    fail "Implicitly aliased expressions in RETURNING are not supported"
 
 
 getUnqualifiedNameFromAst :: PGT_AST.QualifiedName -> Text.Text

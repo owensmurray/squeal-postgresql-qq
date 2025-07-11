@@ -733,6 +733,52 @@ main =
                 "INSERT INTO \"users_copy\" AS \"users_copy\" SELECT \"id\" AS \"id\", \"name\" AS \"name\", \"bio\" AS \"bio\" FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = (E'uid1' :: text))"
             checkStatement squealRendering statement
 
+      describe "returning clause" $ do
+        it
+          "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') returning id"
+          $ do
+            let
+              statement
+                :: Statement DB () (Field "id" Int32, ())
+              statement =
+                [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (1, 'user-1', 'foo@bar')
+                returning id
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING \"id\" AS \"id\""
+            checkStatement squealRendering statement
+
+        it
+          "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') returning *"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "id" Int32
+                     , ( Field "user_id" Text
+                       , ( Field "email" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (1, 'user-1', 'foo@bar')
+                returning *
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING *"
+            checkStatement squealRendering statement
+
     describe "deletes" $ do
       it "delete from users where true" $ do
         let
