@@ -425,11 +425,11 @@ main =
                    )
             statement =
               [ssql|
-              select users.id
-              from users
-              left outer join emails
-              on emails.user_id = users.id
-            |]
+                select users.id
+                from users
+                left outer join emails
+                on emails.user_id = users.id
+              |]
             squealRendering :: Text
             squealRendering =
               "SELECT \"users\".\"id\" AS \"id\" FROM \"users\" AS \"users\" LEFT OUTER JOIN \"emails\" AS \"emails\" ON (\"emails\".\"user_id\" = \"users\".\"id\")"
