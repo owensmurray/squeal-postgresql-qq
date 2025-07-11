@@ -514,6 +514,19 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
                       pure $ VarE 'S.inline `AppE` VarE varName
                   _ -> fail "inline() function expects a single variable argument"
               _ -> fail "inline() function expects a single variable argument"
+          "inline_param" ->
+            case maybeParams of
+              Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
+                case NE.toList args of
+                  [ PGT_AST.ExprFuncArgExpr
+                      (PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)))
+                    ] -> do
+                      let
+                        varName :: Name
+                        varName = mkName . Text.unpack . getIdentText $ ident
+                      pure $ VarE 'S.inlineParam `AppE` VarE varName
+                  _ -> fail "inline_param() function expects a single variable argument"
+              _ -> fail "inline_param() function expects a single variable argument"
           otherFnName ->
             let
               squealFn :: Q Exp

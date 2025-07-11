@@ -21,8 +21,8 @@ import Data.UUID (UUID)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Prelude
-  ( Applicative(pure), Eq((==)), MonadFail(fail), Semigroup((<>)), Show(show)
-  , ($), (.), Bool, IO, Maybe, putStrLn
+  ( Applicative(pure), Eq((==)), Maybe(Just, Nothing), MonadFail(fail)
+  , Semigroup((<>)), Show(show), ($), (.), Bool, IO, putStrLn
   )
 import Squeal.PostgreSQL
   ( NullType(NotNull, Null), Optionality(Def, NoDef)
@@ -580,6 +580,25 @@ main =
           squealRendering =
             "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, ($2 :: text), ($1 :: text))"
         checkStatement squealRendering statement
+
+      it
+        "insert into emails (id, user_id, email) values (inline(i), inline(uid), inline(e))"
+        $ do
+          let
+            mkStatement :: Int32 -> Text -> Maybe Text -> Statement DB () ()
+            mkStatement i uid e =
+              [ssql|
+                insert into
+                  emails (id, user_id, email)
+                  values (inline(i), inline(uid), inline_param(e))
+              |]
+
+          checkStatement
+            "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES ((1 :: int4), (E'user-1' :: text), NULL)"
+            (mkStatement 1 "user-1" Nothing)
+          checkStatement
+            "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES ((1 :: int4), (E'user-1' :: text), (E'foo@bar.com' :: text))"
+            (mkStatement 1 "user-1" (Just "foo@bar.com"))
 
       describe "default keyword" $ do
         it "insert into emails (id, user_id, email) values (default, 'foo', 'bar')" $ do
