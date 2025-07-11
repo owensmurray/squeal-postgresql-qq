@@ -435,6 +435,39 @@ main =
               "SELECT \"users\".\"id\" AS \"id\" FROM \"users\" AS \"users\" LEFT OUTER JOIN \"emails\" AS \"emails\" ON (\"emails\".\"user_id\" = \"users\".\"id\")"
           checkStatement squealRendering statement
 
+      it
+        "select * from users left outer join emails on users.id == emails.user_id"
+        $ do
+          let
+            targetEmail :: Text
+            targetEmail = "foo@bar.com"
+
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "email" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+            statement =
+              [ssql|
+                select users.id, users.name, emails.email
+                from users
+                left outer join emails
+                on emails.user_id = users.id
+                where emails.email = inline("targetEmail")
+              |]
+
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"users\".\"id\" AS \"id\", \"users\".\"name\" AS \"name\", \"emails\".\"email\" AS \"email\" FROM \"users\" AS \"users\" LEFT OUTER JOIN \"emails\" AS \"emails\" ON (\"emails\".\"user_id\" = \"users\".\"id\") WHERE (\"emails\".\"email\" = (E'foo@bar.com' :: text))"
+
+          checkStatement squealRendering statement
+
       it "select 'text_val'" $ do
         let
           statement
