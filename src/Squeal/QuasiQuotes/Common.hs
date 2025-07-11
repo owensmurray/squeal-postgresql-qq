@@ -1,4 +1,5 @@
-{-# LANGUAGE GHC2024 #-}
+{-# LANGUAGE GHC2021 #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
@@ -15,6 +16,7 @@ module Squeal.QuasiQuotes.Common (
 
 import Control.Applicative (Alternative((<|>)))
 import Control.Monad (when)
+import Data.Foldable (Foldable(elem, foldl', null))
 import Data.Maybe (isJust)
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
@@ -23,10 +25,10 @@ import Language.Haskell.TH.Syntax
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(elem, foldl', null), Functor(fmap), Maybe(Just, Nothing)
-  , MonadFail(fail), Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>))
-  , Show(show), Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer
-  , any, either, error, fromIntegral, id
+  , Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
+  , Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>)), Show(show)
+  , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, any, either
+  , error, fromIntegral, id
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE

@@ -10,15 +10,15 @@ module Squeal.QuasiQuotes.Query (
 ) where
 
 import Control.Monad (unless, when)
+import Data.Foldable (Foldable(foldl', foldr, null))
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, ConE, InfixE, LabelE, ListE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right)
-  , Foldable(foldl', foldr, null), Maybe(Just, Nothing), MonadFail(fail)
-  , Num((+)), Ord((>=)), Semigroup((<>)), Show(show), Traversable(mapM), ($)
-  , (&&), (<$>), Int, fromIntegral, zip
+  , Maybe(Just, Nothing), MonadFail(fail), Num((+)), Ord((>=)), Semigroup((<>))
+  , Show(show), Traversable(mapM), ($), (&&), (<$>), Int, fromIntegral, zip
   )
 import Squeal.QuasiQuotes.Common
   ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargeting
