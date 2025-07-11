@@ -8,7 +8,8 @@ module Squeal.QuasiQuotes.Insert (
   toSquealInsert,
 ) where
 
-import Control.Monad (MonadFail(fail), mapM, zipWithM)
+import Control.Monad (MonadFail(fail), mapM, when, zipWithM)
+import Data.Maybe (isJust)
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, ListE, VarE), Q)
 import Prelude
   ( Applicative(pure), Either(Left), Eq((/=)), Foldable(foldr, length)
@@ -26,15 +27,22 @@ import qualified Squeal.PostgreSQL as S
 toSquealInsert :: PGT_AST.InsertStmt -> Q Exp
 toSquealInsert
   ( PGT_AST.InsertStmt
-      _maybeWithClause
+      maybeWithClause
       insertTarget
       insertRest
-      _maybeOnConflict
+      maybeOnConflict
       maybeReturningClause
     ) = do
+    when (isJust maybeWithClause) $
+      fail "WITH clauses are not supported in INSERT statements yet."
+    when (isJust maybeOnConflict) $
+      fail "ON CONFLICT clauses are not supported yet."
+
     insertBody <-
       case insertRest of
-        PGT_AST.SelectInsertRest maybeInsertColumnList _maybeOverrideKind selectStmt -> do
+        PGT_AST.SelectInsertRest maybeInsertColumnList maybeOverrideKind selectStmt -> do
+          when (isJust maybeOverrideKind) $
+            fail "OVERRIDING clause is not supported yet."
           queryClauseExp <-
             case selectStmt of
               -- Case 1: INSERT ... VALUES ...
@@ -179,7 +187,9 @@ renderPGTValueRow colItems exprs
     nvpToCons item acc = ConE '(S.:*) `AppE` item `AppE` acc
 
     processItem :: PGT_AST.InsertColumnItem -> PGT_AST.AExpr -> Q Exp
-    processItem (PGT_AST.InsertColumnItem colId _maybeIndirection) expr = do
+    processItem (PGT_AST.InsertColumnItem colId maybeIndirection) expr = do
+      when (isJust maybeIndirection) $
+        fail "INSERT with indirection (e.g., array access) is not supported."
       let
         colNameStr = Text.unpack (getIdentText colId)
       case expr of

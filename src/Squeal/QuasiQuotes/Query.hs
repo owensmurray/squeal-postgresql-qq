@@ -46,12 +46,13 @@ toSquealSelectWithParens = \case
 toSquealSelectNoParens :: PGT_AST.SelectNoParens -> Q Exp
 toSquealSelectNoParens
   ( PGT_AST.SelectNoParens
-      _maybeWithClause
+      maybeWithClause
       selectClause
       maybeSortClause
       maybeSelectLimit
       maybeForLockingClause
-    ) =
+    ) = do
+    when (isJust maybeWithClause) $ fail "WITH clauses are not supported yet."
     case selectClause of
       Left simpleSelect ->
         toSquealSimpleSelect
@@ -71,9 +72,13 @@ toSquealSimpleSelect
 toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
     PGT_AST.ValuesSimpleSelect valuesClause -> do
-      unless (isNothing maybeSelectLimit && isNothing maybeForLockingClause) $
-        fail $
-          "OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
+      unless
+        ( isNothing maybeSortClause
+            && isNothing maybeSelectLimit
+            && isNothing maybeForLockingClause
+        )
+        $ fail $
+          "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
             <> "in this translation yet."
       renderedValues <- renderValuesClauseToNP valuesClause
       pure $ VarE 'S.values_ `AppE` renderedValues
@@ -389,7 +394,10 @@ processSelectLimit tableExpr (Just selectLimit) = do
 
 renderPGTLimitClause :: PGT_AST.LimitClause -> Q Exp
 renderPGTLimitClause = \case
-  PGT_AST.LimitLimitClause slValue _mOffsetVal ->
+  PGT_AST.LimitLimitClause slValue mOffsetVal -> do
+    when (isJust mOffsetVal) $
+      fail
+        "LIMIT with comma (e.g. LIMIT x, y) is not supported. Use separate LIMIT and OFFSET clauses."
     case slValue of
       PGT_AST.ExprSelectLimitValue
         ( PGT_AST.CExprAExpr
@@ -424,26 +432,8 @@ renderPGTLimitClause = \case
       PGT_AST.AllSelectLimitValue ->
         fail "LIMIT ALL not supported in this translation."
       expr -> fail $ "Unsupported LIMIT expression: " <> show expr
-  PGT_AST.FetchOnlyLimitClause _ mVal _ -> case mVal of
-    Just (PGT_AST.NumSelectFetchFirstValue _ (Left n)) ->
-      if n >= 0
-        then pure (LitE (IntegerL (fromIntegral n)))
-        else fail $ "FETCH FIRST value must be non-negative: " <> show n
-    Just (PGT_AST.NumSelectFetchFirstValue _ (Right d)) ->
-      fail $ "FETCH FIRST with float value not supported: " <> show d
-    Just
-      ( PGT_AST.ExprSelectFetchFirstValue
-          (PGT_AST.AexprConstCExpr (PGT_AST.IAexprConst n))
-        ) ->
-        if n >= 0
-          then pure (LitE (IntegerL (fromIntegral n)))
-          else fail $ "FETCH FIRST value must be non-negative: " <> show n
-    Just (PGT_AST.ExprSelectFetchFirstValue cexpr) ->
-      fail $ "Unsupported FETCH FIRST expression: " <> show cexpr
-    Nothing ->
-      fail $
-        "FETCH FIRST without value not supported (Squeal requires "
-          <> "explicit value for limit)."
+  PGT_AST.FetchOnlyLimitClause{} ->
+    fail "FETCH clause is not fully supported yet."
 
 
 renderPGTOffsetClause :: PGT_AST.OffsetClause -> Q Exp
@@ -481,12 +471,8 @@ renderPGTOffsetClause = \case
   PGT_AST.ExprOffsetClause expr ->
     fail $
       "Unsupported OFFSET expression: " <> show expr
-  PGT_AST.FetchFirstOffsetClause sffv _ -> case sffv of
-    PGT_AST.NumSelectFetchFirstValue _ (Left n) ->
-      if n >= 0
-        then pure (LitE (IntegerL (fromIntegral n)))
-        else fail $ "OFFSET value must be non-negative: " <> show n
-    _ -> fail $ "Unsupported OFFSET FETCH FIRST value: " <> show sffv
+  PGT_AST.FetchFirstOffsetClause{} ->
+    fail "OFFSET with FETCH FIRST clause is not supported yet."
 
 
 -- Helper to render a single TargetEl for S.values_
