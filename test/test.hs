@@ -1017,6 +1017,25 @@ main =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
 
+      describe "with common table expressions" $ do
+        it
+          "with to_update as (select id from users where name = 'Alice') update users set name = 'Alicia' from to_update where users.id = to_update.id"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_update as (select id from users where name = 'Alice')
+                  update users
+                  set name = 'Alicia'
+                  from to_update
+                  where users.id = to_update.id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_update\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) UPDATE \"users\" AS \"users\" SET \"name\" = (E'Alicia' :: text) FROM \"to_update\" AS \"to_update\" WHERE (\"users\".\"id\" = \"to_update\".\"id\")"
+            checkStatement squealRendering statement
+
     describe "scalar expressions" $ do
       -- Binary Operators
       it "select users.id != 'no-such-user' as neq from users" $ do
