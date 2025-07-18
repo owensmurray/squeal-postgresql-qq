@@ -169,7 +169,7 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'bob' :: text))"
         checkStatement squealRendering statement
 
-      it "select user.name from users" $ do
+      it "select users.name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
           statement = [ssql| select users.name from users |]
@@ -413,7 +413,7 @@ main =
         checkStatement squealRendering statement
 
       it
-        "select users.id from users left outer join emails on users.id == emails.user_id"
+        "select users.id from users left outer join emails on emails.user_id = users.id"
         $ do
           let
             statement
@@ -436,7 +436,7 @@ main =
           checkStatement squealRendering statement
 
       it
-        "select * from users left outer join emails on users.id == emails.user_id"
+        "select users.id, users.name, emails.email from users left outer join emails on emails.user_id = users.id where emails.email = inline(\"targetEmail\")"
         $ do
           let
             targetEmail :: Text
@@ -558,6 +558,61 @@ main =
               "SELECT \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", count(ALL \"id\") AS \"_col3\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\", \"name\""
           checkStatement squealRendering statement
 
+      describe "common table expressions" $ do
+        it "with users_cte as (select * from users) select * from users_cte" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| with users_cte as (select * from users) select * from users_cte |]
+            squealRendering :: Text
+            squealRendering =
+              "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\") SELECT * FROM \"users_cte\" AS \"users_cte\""
+          checkStatement squealRendering statement
+
+        it
+          "with users_cte as (select * from users), emails_cte as (select * from emails) select users_cte.*, emails_cte.email from users_cte join emails_cte on users_cte.id = emails_cte.user_id"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "id" Text
+                     , ( Field "name" Text
+                       , ( Field "employee_id" UUID
+                         , ( Field "bio" (Maybe Text)
+                           , ( Field "email" (Maybe Text)
+                             , ()
+                             )
+                           )
+                         )
+                       )
+                     )
+              statement =
+                [ssql|
+                  with
+                    users_cte as (select * from users),
+                    emails_cte as (select * from emails)
+                  select users_cte.*, emails_cte.email
+                  from users_cte
+                  join emails_cte on users_cte.id = emails_cte.user_id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\"), \"emails_cte\" AS (SELECT * FROM \"emails\" AS \"emails\") SELECT \"users_cte\".*, \"emails_cte\".\"email\" AS \"email\" FROM \"users_cte\" AS \"users_cte\" INNER JOIN \"emails_cte\" AS \"emails_cte\" ON (\"users_cte\".\"id\" = \"emails_cte\".\"user_id\")"
+            checkStatement squealRendering statement
+
     describe "inserts" $ do
       it "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar')" $ do
         let
@@ -615,7 +670,7 @@ main =
         checkStatement squealRendering statement
 
       it
-        "insert into emails (id, user_id, email) values (inline(i), inline(uid), inline(e))"
+        "insert into emails (id, user_id, email) values (inline(i), inline(uid), inline_param(e))"
         $ do
           let
             mkStatement :: Int32 -> Text -> Maybe Text -> Statement DB () ()
@@ -821,7 +876,7 @@ main =
                      )
               statement =
                 [ssql|
-                insert into
+                  insert into
                   emails (id, user_id, email)
                   values (1, 'user-1', 'foo@bar')
                 returning *
@@ -829,6 +884,23 @@ main =
               squealRendering :: Text
               squealRendering =
                 "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING *"
+            checkStatement squealRendering statement
+
+      describe "with common table expressions" $ do
+        it
+          "with new_user (id, name, bio) as (values ('id_new', 'new_name', 'new_bio')) insert into users_copy select * from new_user"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with new_user (id, name, bio) as (values ('id_new', 'new_name', 'new_bio'))
+                  insert into users_copy
+                  select * from new_user
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"new_user\" AS (SELECT * FROM (VALUES ((E'id_new' :: text), (E'new_name' :: text), (E'new_bio' :: text))) AS t (\"id\", \"name\", \"bio\")) INSERT INTO \"users_copy\" AS \"users_copy\" SELECT * FROM \"new_user\" AS \"new_user\""
             checkStatement squealRendering statement
 
     describe "deletes" $ do
@@ -869,6 +941,40 @@ main =
           squealRendering =
             "DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
+
+      describe "with common table expressions" $ do
+        it
+          "with to_delete as (select id from users where name = 'Alice') delete from users where id in (select to_delete.id from to_delete)"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_delete as (select id from users where name = 'Alice')
+                  delete from users
+                  where id in (select to_delete.id from to_delete)
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_delete\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = ANY (SELECT \"to_delete\".\"id\" AS \"id\" FROM \"to_delete\" AS \"to_delete\"))"
+            checkStatement squealRendering statement
+
+        it
+          "with to_delete as (select id from users where name = 'Alice') delete from users using to_delete where users.id = to_delete.id"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_delete as (select id from users where name = 'Alice')
+                  delete from users
+                  using to_delete
+                  where users.id = to_delete.id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_delete\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) DELETE FROM \"users\" AS \"users\" USING \"to_delete\" AS \"to_delete\" WHERE (\"users\".\"id\" = \"to_delete\".\"id\")"
+            checkStatement squealRendering statement
 
     describe "updates" $ do
       it "update users set name = 'new name' where id = 'some-id'" $ do
@@ -911,9 +1017,28 @@ main =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
 
+      describe "with common table expressions" $ do
+        it
+          "with to_update as (select id from users where name = 'Alice') update users set name = 'Alicia' from to_update where users.id = to_update.id"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_update as (select id from users where name = 'Alice')
+                  update users
+                  set name = 'Alicia'
+                  from to_update
+                  where users.id = to_update.id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_update\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) UPDATE \"users\" AS \"users\" SET \"name\" = (E'Alicia' :: text) FROM \"to_update\" AS \"to_update\" WHERE (\"users\".\"id\" = \"to_update\".\"id\")"
+            checkStatement squealRendering statement
+
     describe "scalar expressions" $ do
       -- Binary Operators
-      it "select id != 'no-such-user' as neq from users" $ do
+      it "select users.id != 'no-such-user' as neq from users" $ do
         let
           stmt :: Statement DB () (Field "neq" (Maybe Bool), ())
           stmt = [ssql| select users.id != 'no-such-user' as neq from users |]
@@ -923,7 +1048,7 @@ main =
               <> "\"neq\" FROM \"users\" AS \"users\""
         checkStatement squealRendering stmt
 
-      it "select * from users where id <> 'no-such-user'" $ do
+      it "select * from users where users.id <> 'no-such-user'" $ do
         let
           stmt
             :: Statement
@@ -944,7 +1069,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" <> (E'no-such-user' :: text))"
         checkStatement squealRendering stmt
 
-      it "select * from emails where id > 0" $ do
+      it "select * from emails where emails.id > 0" $ do
         let
           stmt
             :: Statement
@@ -956,7 +1081,7 @@ main =
           squealRendering = "SELECT * FROM \"emails\" AS \"emails\" WHERE (\"emails\".\"id\" > 0)"
         checkStatement squealRendering stmt
 
-      it "select * from emails where id >= 0" $ do
+      it "select * from emails where emails.id >= 0" $ do
         let
           stmt
             :: Statement
@@ -968,7 +1093,7 @@ main =
           squealRendering = "SELECT * FROM \"emails\" AS \"emails\" WHERE (\"emails\".\"id\" >= 0)"
         checkStatement squealRendering stmt
 
-      it "select * from emails where id < 10" $ do
+      it "select * from emails where emails.id < 10" $ do
         let
           stmt
             :: Statement
@@ -980,7 +1105,7 @@ main =
           squealRendering = "SELECT * FROM \"emails\" AS \"emails\" WHERE (\"emails\".\"id\" < 10)"
         checkStatement squealRendering stmt
 
-      it "select * from emails where id <= 10" $ do
+      it "select * from emails where emails.id <= 10" $ do
         let
           stmt
             :: Statement
@@ -992,7 +1117,7 @@ main =
           squealRendering = "SELECT * FROM \"emails\" AS \"emails\" WHERE (\"emails\".\"id\" <= 10)"
         checkStatement squealRendering stmt
 
-      it "select id + 1 as plus_one from emails" $ do
+      it "select emails.id + 1 as plus_one from emails" $ do
         let
           stmt :: Statement DB () (Field "plus_one" Int32, ())
           stmt = [ssql| select emails.id + 1 as plus_one from emails |]
@@ -1001,7 +1126,7 @@ main =
             "SELECT (\"emails\".\"id\" + 1) AS \"plus_one\" FROM \"emails\" AS \"emails\""
         checkStatement squealRendering stmt
 
-      it "select id - 1 as minus_one from emails" $ do
+      it "select emails.id - 1 as minus_one from emails" $ do
         let
           stmt :: Statement DB () (Field "minus_one" Int32, ())
           stmt = [ssql| select emails.id - 1 as minus_one from emails |]
@@ -1010,7 +1135,7 @@ main =
             "SELECT (\"emails\".\"id\" - 1) AS \"minus_one\" FROM \"emails\" AS \"emails\""
         checkStatement squealRendering stmt
 
-      it "select id * 2 as times_two from emails" $ do
+      it "select emails.id * 2 as times_two from emails" $ do
         let
           stmt :: Statement DB () (Field "times_two" Int32, ())
           stmt = [ssql| select emails.id * 2 as times_two from emails |]
@@ -1019,7 +1144,7 @@ main =
             "SELECT (\"emails\".\"id\" * 2) AS \"times_two\" FROM \"emails\" AS \"emails\""
         checkStatement squealRendering stmt
 
-      it "select * from users where id = 'a' and name = 'b'" $ do
+      it "select * from users where users.id = 'a' and users.name = 'b'" $ do
         let
           stmt
             :: Statement
@@ -1034,7 +1159,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE ((\"users\".\"id\" = (E'a' :: text)) AND (\"users\".\"name\" = (E'b' :: text)))"
         checkStatement squealRendering stmt
 
-      it "select * from users where id = 'a' or name = 'b'" $ do
+      it "select * from users where users.id = 'a' or users.name = 'b'" $ do
         let
           stmt
             :: Statement
@@ -1049,7 +1174,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE ((\"users\".\"id\" = (E'a' :: text)) OR (\"users\".\"name\" = (E'b' :: text)))"
         checkStatement squealRendering stmt
 
-      it "select * from users where name like 'A%'" $ do
+      it "select * from users where users.name like 'A%'" $ do
         let
           stmt
             :: Statement
@@ -1064,7 +1189,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"name\" LIKE (E'A%' :: text))"
         checkStatement squealRendering stmt
 
-      it "select * from users where name ilike 'a%'" $ do
+      it "select * from users where users.name ilike 'a%'" $ do
         let
           stmt
             :: Statement
@@ -1080,7 +1205,7 @@ main =
         checkStatement squealRendering stmt
 
       -- Prefix Operators
-      it "select * from users where not (name = 'no-one')" $ do
+      it "select * from users where not (users.name = 'no-one')" $ do
         let
           stmt
             :: Statement
@@ -1095,7 +1220,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE (NOT (\"users\".\"name\" = (E'no-one' :: text)))"
         checkStatement squealRendering stmt
 
-      it "select -id as neg_id from emails" $ do
+      it "select -emails.id as neg_id from emails" $ do
         let
           stmt :: Statement DB () (Field "neg_id" Int32, ())
           stmt = [ssql| select -emails.id as neg_id from emails |]
@@ -1105,7 +1230,7 @@ main =
         checkStatement squealRendering stmt
 
       -- Postfix Operators
-      it "select * from users where bio is null" $ do
+      it "select * from users where users.bio is null" $ do
         let
           stmt
             :: Statement
@@ -1119,7 +1244,7 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"bio\" IS NULL"
         checkStatement squealRendering stmt
 
-      it "select * from users where bio is not null" $ do
+      it "select * from users where users.bio is not null" $ do
         let
           stmt
             :: Statement
@@ -1135,7 +1260,7 @@ main =
 
       describe "function calls" $ do
         -- Function Calls
-        it "select coalesce(bio, 'no bio') as bio from users" $ do
+        it "select coalesce(users.bio, 'no bio') as bio from users" $ do
           let
             stmt :: Statement DB () (Field "bio" Text, ())
             stmt = [ssql| select coalesce(users.bio, 'no bio') as bio from users |]
@@ -1144,7 +1269,7 @@ main =
               "SELECT COALESCE(\"users\".\"bio\", (E'no bio' :: text)) AS \"bio\" FROM \"users\" AS \"users\""
           checkStatement squealRendering stmt
 
-        it "select lower(name) as lower_name from users" $ do
+        it "select lower(users.name) as lower_name from users" $ do
           let
             stmt :: Statement DB () (Field "lower_name" Text, ())
             stmt = [ssql| select lower(users.name) as lower_name from users |]
@@ -1153,7 +1278,7 @@ main =
               "SELECT lower(\"users\".\"name\") AS \"lower_name\" FROM \"users\" AS \"users\""
           checkStatement squealRendering stmt
 
-        it "select char_length(name) as name_len from users" $ do
+        it "select char_length(users.name) as name_len from users" $ do
           let
             stmt :: Statement DB () (Field "name_len" Int32, ())
             stmt = [ssql| select char_length(users.name) as name_len from users |]
@@ -1162,7 +1287,7 @@ main =
               "SELECT char_length(\"users\".\"name\") AS \"name_len\" FROM \"users\" AS \"users\""
           checkStatement squealRendering stmt
 
-        it "select character_length(name) as name_len_alias from users" $ do
+        it "select character_length(users.name) as name_len_alias from users" $ do
           let
             stmt :: Statement DB () (Field "name_len_alias" Int32, ())
             stmt = [ssql| select character_length(users.name) as name_len_alias from users |]
@@ -1171,7 +1296,7 @@ main =
               "SELECT char_length(\"users\".\"name\") AS \"name_len_alias\" FROM \"users\" AS \"users\""
           checkStatement squealRendering stmt
 
-        it "select upper(name) as upper_name from users" $ do
+        it "select \"upper\"(users.name) as upper_name from users" $ do
           let
             stmt :: Statement DB () (Field "upper_name" Text, ())
             stmt = [ssql| select "upper"(users.name) as upper_name from users |]
@@ -1225,7 +1350,7 @@ main =
           checkStatement squealRendering2 (mkStatement "Bob")
 
       -- PARENS (implicitly tested by complex expressions)
-      it "select (id + 1) * 2 as calc from emails" $ do
+      it "select (emails.id + 1) * 2 as calc from emails" $ do
         let
           stmt :: Statement DB () (Field "calc" Int32, ())
           stmt = [ssql| select (emails.id + 1) * 2 as calc from emails |]
@@ -1235,7 +1360,7 @@ main =
         checkStatement squealRendering stmt
 
       -- IN / NOT IN
-      it "select * from users where name in ('Alice', 'Bob')" $ do
+      it "select * from users where users.name in ('Alice', 'Bob')" $ do
         let
           stmt
             :: Statement
@@ -1250,7 +1375,7 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"name\" IN ((E'Alice' :: text), (E'Bob' :: text))"
         checkStatement squealRendering stmt
 
-      it "select * from users where name not in ('Alice', 'Bob')" $ do
+      it "select * from users where users.name not in ('Alice', 'Bob')" $ do
         let
           stmt
             :: Statement
@@ -1266,7 +1391,7 @@ main =
         checkStatement squealRendering stmt
 
       -- BETWEEN / NOT BETWEEN
-      it "select * from emails where id between 0 and 10" $ do
+      it "select * from emails where emails.id between 0 and 10" $ do
         let
           stmt
             :: Statement
@@ -1279,7 +1404,7 @@ main =
             "SELECT * FROM \"emails\" AS \"emails\" WHERE \"emails\".\"id\" BETWEEN 0 AND 10"
         checkStatement squealRendering stmt
 
-      it "select * from emails where id not between 0 and 10" $ do
+      it "select * from emails where emails.id not between 0 and 10" $ do
         let
           stmt
             :: Statement
@@ -1293,7 +1418,7 @@ main =
         checkStatement squealRendering stmt
 
       -- CAST
-      it "select cast(e.id as text) as casted_id from emails as e" $ do
+      it "select (e.id :: text) as casted_id from emails as e" $ do
         let
           stmt :: Statement DB () (Field "casted_id" Text, ())
           stmt = [ssql| select (e.id :: text) as casted_id from emails as e |]

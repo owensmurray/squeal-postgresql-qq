@@ -9,19 +9,56 @@ module Squeal.QuasiQuotes.Insert (
 ) where
 
 import Control.Monad (MonadFail(fail), mapM, when, zipWithM)
+import Data.Foldable (Foldable(foldr, length), foldlM)
 import Data.Maybe (isJust)
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, ListE, VarE), Q)
 import Prelude
-  ( Applicative(pure), Either(Left), Eq((/=)), Foldable(foldr, length)
-  , Maybe(Just, Nothing), Semigroup((<>)), Show(show), ($), (.), error
-  , otherwise
+  ( Applicative(pure), Either(Left), Eq((/=)), Maybe(Just, Nothing)
+  , Semigroup((<>)), Show(show), ($), (.), error, otherwise
   )
-import Squeal.QuasiQuotes.Common (getIdentText, renderPGTAExpr)
-import Squeal.QuasiQuotes.Query (toSquealQuery)
+import Squeal.QuasiQuotes.Query (getIdentText, renderPGTAExpr, toSquealQuery)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
 import qualified Squeal.PostgreSQL as S
+
+
+renderPGTWithClause :: PGT_AST.WithClause -> Q ([Text.Text], Exp)
+renderPGTWithClause (PGT_AST.WithClause recursive ctes) = do
+    when recursive $ fail "Recursive WITH clauses are not supported yet."
+    let
+      cteList = NE.toList ctes
+    (finalCteNames, renderedCtes) <-
+      foldlM
+        ( \(names, exps) cte -> do
+            (name, exp) <- renderCte names cte
+            pure (names <> [name], exps <> [exp])
+        )
+        ([], [])
+        cteList
+
+    let
+      withExp =
+        foldr
+          (\cte acc -> ConE '(S.:>>) `AppE` cte `AppE` acc)
+          (ConE 'S.Done)
+          renderedCtes
+    pure (finalCteNames, withExp)
+  where
+    renderCte :: [Text.Text] -> PGT_AST.CommonTableExpr -> Q (Text.Text, Exp)
+    renderCte existingCteNames (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
+      when (isJust maybeMaterialized) $
+        fail "MATERIALIZED/NOT MATERIALIZED for CTEs is not supported yet."
+      cteStmtExp <-
+        case stmt of
+          PGT_AST.SelectPreparableStmt selectStmt -> do
+            queryExp <- toSquealQuery existingCteNames maybeColNames selectStmt
+            pure $ VarE 'S.queryStatement `AppE` queryExp
+          _ -> fail "Only SELECT statements are supported in CTEs for now."
+      let
+        cteName = getIdentText ident
+      pure
+        (cteName, VarE 'S.as `AppE` cteStmtExp `AppE` LabelE (Text.unpack cteName))
 
 
 toSquealInsert :: PGT_AST.InsertStmt -> Q Exp
@@ -33,8 +70,13 @@ toSquealInsert
       maybeOnConflict
       maybeReturningClause
     ) = do
-    when (isJust maybeWithClause) $
-      fail "WITH clauses are not supported in INSERT statements yet."
+    (cteNames, renderedWithClause) <-
+      case maybeWithClause of
+        Nothing -> pure ([], Nothing)
+        Just withClause -> do
+          (names, exp) <- renderPGTWithClause withClause
+          pure (names, Just exp)
+
     when (isJust maybeOnConflict) $
       fail "ON CONFLICT clauses are not supported yet."
 
@@ -50,7 +92,7 @@ toSquealInsert
                 (PGT_AST.SelectNoParens _ (Left (PGT_AST.ValuesSimpleSelect valuesClause)) _ _ _) ->
                   case maybeInsertColumnList of
                     Just colItems ->
-                      renderPGTValueRows (NE.toList colItems) valuesClause
+                      renderPGTValueRows cteNames (NE.toList colItems) valuesClause
                     Nothing ->
                       fail
                         "INSERT INTO ... VALUES must specify column names for the Squeal-QQ translation."
@@ -62,7 +104,7 @@ toSquealInsert
                     fail
                       "INSERT INTO table (columns) SELECT ... is not yet supported by Squeal-QQ. Please use INSERT INTO table SELECT ... and ensure your SELECT statement provides all columns for the table, matching the table's column order and types."
                   Nothing -> do
-                    squealQueryExp <- toSquealQuery selectStmt -- from Squeal.QuasiQuotes.Query
+                    squealQueryExp <- toSquealQuery cteNames Nothing selectStmt -- from Squeal.QuasiQuotes.Query
                     pure (ConE 'S.Subquery `AppE` squealQueryExp)
           let
             table = renderPGTInsertTarget insertTarget
@@ -79,7 +121,7 @@ toSquealInsert
                   `AppE` ConE 'S.OnConflictDoRaise
                   `AppE` returning
             Just targetList -> do
-              returningProj <- renderTargetList (NE.toList targetList)
+              returningProj <- renderTargetList cteNames (NE.toList targetList)
               let
                 returning = ConE 'S.Returning `AppE` (ConE 'S.List `AppE` returningProj)
               pure $
@@ -91,12 +133,16 @@ toSquealInsert
         PGT_AST.DefaultValuesInsertRest ->
           fail "INSERT INTO ... DEFAULT VALUES is not yet supported by Squeal-QQ."
 
-    pure insertBody
+    let
+      finalExp = case renderedWithClause of
+        Nothing -> insertBody
+        Just withExp -> VarE 'S.with `AppE` withExp `AppE` insertBody
+    pure finalExp
 
 
-renderTargetList :: [PGT_AST.TargetEl] -> Q Exp
-renderTargetList targetEls = do
-  exps <- mapM renderTargetEl targetEls
+renderTargetList :: [Text.Text] -> [PGT_AST.TargetEl] -> Q Exp
+renderTargetList cteNames targetEls = do
+  exps <- mapM (renderTargetEl cteNames) targetEls
   pure $
     foldr
       (\h t -> ConE '(S.:*) `AppE` h `AppE` t)
@@ -104,10 +150,10 @@ renderTargetList targetEls = do
       exps
 
 
-renderTargetEl :: PGT_AST.TargetEl -> Q Exp
-renderTargetEl = \case
+renderTargetEl :: [Text.Text] -> PGT_AST.TargetEl -> Q Exp
+renderTargetEl cteNames = \case
   PGT_AST.ExprTargetEl expr -> do
-    exprExp <- renderPGTAExpr expr
+    exprExp <- renderPGTAExpr cteNames expr
     case expr of
       PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref ident Nothing)) ->
         let
@@ -118,7 +164,7 @@ renderTargetEl = \case
         fail
           "Returning expression without an alias is not supported for this expression type. Please add an alias."
   PGT_AST.AliasedExprTargetEl expr alias -> do
-    exprExp <- renderPGTAExpr expr
+    exprExp <- renderPGTAExpr cteNames expr
     pure $
       VarE 'S.as `AppE` exprExp `AppE` LabelE (Text.unpack (getIdentText alias))
   PGT_AST.AsteriskTargetEl -> fail "should be handled by toSquealInsert"
@@ -161,49 +207,49 @@ renderPGTQualifiedName = \case
 
 
 renderPGTValueRows
-  :: [PGT_AST.InsertColumnItem] -> PGT_AST.ValuesClause -> Q Exp
-renderPGTValueRows colItems (valuesClauseRows) =
+  :: [Text.Text] -> [PGT_AST.InsertColumnItem] -> PGT_AST.ValuesClause -> Q Exp
+renderPGTValueRows cteNames colItems (valuesClauseRows) =
   -- valuesClauseRows is NonEmpty (NonEmpty AExpr)
   case NE.toList valuesClauseRows of
     [] -> fail "Insert statement has no value rows."
     row : moreRows -> do
-      firstRowExp <- renderPGTValueRow colItems (NE.toList row)
-      moreRowsExp <- mapM (renderPGTValueRow colItems . NE.toList) moreRows
+      firstRowExp <- renderPGTValueRow cteNames colItems (NE.toList row)
+      moreRowsExp <- mapM (renderPGTValueRow cteNames colItems . NE.toList) moreRows
       pure $
         ConE 'S.Values
           `AppE` firstRowExp
           `AppE` ListE moreRowsExp
 
 
-renderPGTValueRow :: [PGT_AST.InsertColumnItem] -> [PGT_AST.AExpr] -> Q Exp
-renderPGTValueRow colItems exprs
-    | length colItems /= length exprs =
-        fail "Mismatched number of column names and values in INSERT statement."
-    | otherwise = do
-        processedItems <- zipWithM processItem colItems exprs
-        pure $ foldr nvpToCons (ConE 'S.Nil) processedItems
-  where
-    nvpToCons :: Exp -> Exp -> Exp
-    nvpToCons item acc = ConE '(S.:*) `AppE` item `AppE` acc
+renderPGTValueRow :: [Text.Text] -> [PGT_AST.InsertColumnItem] -> [PGT_AST.AExpr] -> Q Exp
+renderPGTValueRow cteNames colItems exprs
+  | length colItems /= length exprs =
+      fail "Mismatched number of column names and values in INSERT statement."
+  | otherwise = do
+      processedItems <- zipWithM processItem colItems exprs
+      pure $ foldr nvpToCons (ConE 'S.Nil) processedItems
+ where
+  nvpToCons :: Exp -> Exp -> Exp
+  nvpToCons item acc = ConE '(S.:*) `AppE` item `AppE` acc
 
-    processItem :: PGT_AST.InsertColumnItem -> PGT_AST.AExpr -> Q Exp
-    processItem (PGT_AST.InsertColumnItem colId maybeIndirection) expr = do
-      when (isJust maybeIndirection) $
-        fail "INSERT with indirection (e.g., array access) is not supported."
-      let
-        colNameStr = Text.unpack (getIdentText colId)
-      case expr of
-        PGT_AST.DefaultAExpr ->
-          -- Check for DEFAULT keyword
-          pure $
-            VarE 'S.as
-              `AppE` ConE 'S.Default
-              `AppE` LabelE colNameStr
-        _ -> do
-          renderedExpr <- renderPGTAExpr expr
-          pure $
-            VarE 'S.as
-              `AppE` (ConE 'S.Set `AppE` renderedExpr)
-              `AppE` LabelE colNameStr
+  processItem :: PGT_AST.InsertColumnItem -> PGT_AST.AExpr -> Q Exp
+  processItem (PGT_AST.InsertColumnItem colId maybeIndirection) expr = do
+    when (isJust maybeIndirection) $
+      fail "INSERT with indirection (e.g., array access) is not supported."
+    let
+      colNameStr = Text.unpack (getIdentText colId)
+    case expr of
+      PGT_AST.DefaultAExpr ->
+        -- Check for DEFAULT keyword
+        pure $
+          VarE 'S.as
+            `AppE` ConE 'S.Default
+            `AppE` LabelE colNameStr
+      _ -> do
+        renderedExpr <- renderPGTAExpr cteNames expr
+        pure $
+          VarE 'S.as
+            `AppE` (ConE 'S.Set `AppE` renderedExpr)
+            `AppE` LabelE colNameStr
 
 

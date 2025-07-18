@@ -11,4 +11,10 @@ allow-newer:
 
 constraints:
   postgresql-binary == 0.13.1.3
+  -- Squeal doesn't have the correct version bounds for
+  -- postgresql-binary. The current version right now is
+  -- postgresql-binary-0.14.0.1.  Squeal is not compatible with this
+  -- version. But since it doesn't have the correct version of bounds,
+  -- the Cabal solver will choose the newer version and Squeal will fail
+  -- to compile.
 
