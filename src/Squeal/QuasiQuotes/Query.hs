@@ -1180,14 +1180,19 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
           opVar' = if not then VarE 'S.notBetween else VarE 'S.between
         pure $ opVar' `AppE` renderedExpr' `AppE` TupE [Just bExp', Just aExp']
       PGT_AST.InAExprReversableOp inExpr ->
-        let
-          opVar' = if not then VarE 'S.notIn else VarE 'S.in_
-        in
-          case inExpr of
-            PGT_AST.ExprListInExpr exprList -> do
-              listExp' <- ListE <$> mapM renderPGTAExpr (NE.toList exprList)
-              pure $ opVar' `AppE` renderedExpr' `AppE` listExp'
-            _ -> fail "Unsupported IN subquery expression"
+        case inExpr of
+          PGT_AST.ExprListInExpr exprList -> do
+            let opVar' = if not then VarE 'S.notIn else VarE 'S.in_
+            listExp' <- ListE <$> mapM renderPGTAExpr (NE.toList exprList)
+            pure $ opVar' `AppE` renderedExpr' `AppE` listExp'
+          PGT_AST.SelectInExpr selectWithParens -> do
+            let
+              (squealOp, squealFn) =
+                if not
+                  then (VarE '(S../=), VarE 'S.subAll)
+                  else (VarE '(S..==), VarE 'S.subAny)
+            subqueryExp <- toSquealSelectWithParens [] Nothing selectWithParens
+            pure $ squealFn `AppE` renderedExpr' `AppE` squealOp `AppE` subqueryExp
       _ -> fail $ "Unsupported reversable operator: " <> show reversableOp
   PGT_AST.DefaultAExpr -> pure $ ConE 'S.Default
   PGT_AST.MinusAExpr expr -> do

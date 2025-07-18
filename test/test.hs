@@ -1337,6 +1337,36 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"name\" NOT IN ((E'Alice' :: text), (E'Bob' :: text))"
         checkStatement squealRendering stmt
 
+      it "select * from users where id in (select user_id from emails)" $ do
+        let
+          stmt
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
+                 )
+          stmt = [ssql| select * from users where id in (select emails.user_id from emails) |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM \"users\" AS \"users\" WHERE (\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
+        checkStatement squealRendering stmt
+
+      it "select * from users where id not in (select user_id from emails)" $ do
+        let
+          stmt
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
+                 )
+          stmt = [ssql| select * from users where id not in (select emails.user_id from emails) |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM \"users\" AS \"users\" WHERE (\"id\" <> ALL (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
+        checkStatement squealRendering stmt
+
       -- BETWEEN / NOT BETWEEN
       it "select * from emails where id between 0 and 10" $ do
         let
