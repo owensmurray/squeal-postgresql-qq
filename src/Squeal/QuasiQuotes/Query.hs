@@ -10,15 +10,16 @@ module Squeal.QuasiQuotes.Query (
 ) where
 
 import Control.Monad (unless, when)
-import Data.Foldable (Foldable(foldl', foldr, null))
+import Data.Foldable (foldlM)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, ConE, InfixE, LabelE, ListE, LitE, VarE), Lit(IntegerL), Q, mkName
   )
 import Prelude
-  ( Applicative(pure), Bool(False, True), Either(Left, Right)
-  , Maybe(Just, Nothing), MonadFail(fail), Num((+)), Ord((>=)), Semigroup((<>))
-  , Show(show), Traversable(mapM), ($), (&&), (<$>), Int, fromIntegral, zip
+  ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
+  , Foldable(foldl', foldr, length, null), Functor(fmap), Maybe(Just, Nothing)
+  , MonadFail(fail), Ord((>=)), Semigroup((<>)), Show(show), Traversable(mapM)
+  , ($), (&&), (.), (<$>), Int, fromIntegral, zip
   )
 import Squeal.QuasiQuotes.Common
   ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargeting
@@ -29,22 +30,36 @@ import qualified PostgresqlSyntax.Ast as PGT_AST
 import qualified Squeal.PostgreSQL as S
 
 
-toSquealQuery :: PGT_AST.SelectStmt -> Q Exp
-toSquealQuery selectStmt = case selectStmt of
-  Left selectNoParens -> toSquealSelectNoParens selectNoParens
-  Right selectWithParens -> toSquealSelectWithParens selectWithParens
+toSquealQuery
+  :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
+  -> PGT_AST.SelectStmt
+  -> Q Exp
+toSquealQuery cteNames maybeColAliases selectStmt = case selectStmt of
+  Left selectNoParens -> toSquealSelectNoParens cteNames maybeColAliases selectNoParens
+  Right selectWithParens -> toSquealSelectWithParens cteNames maybeColAliases selectWithParens
 
 
-toSquealSelectWithParens :: PGT_AST.SelectWithParens -> Q Exp
-toSquealSelectWithParens = \case
-  PGT_AST.NoParensSelectWithParens snp -> toSquealSelectNoParens snp
+toSquealSelectWithParens
+  :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
+  -> PGT_AST.SelectWithParens
+  -> Q Exp
+toSquealSelectWithParens cteNames maybeColAliases = \case
+  PGT_AST.NoParensSelectWithParens snp -> toSquealSelectNoParens cteNames maybeColAliases snp
   PGT_AST.WithParensSelectWithParens swp ->
     {- The AST structure itself should handle precedence.  Just recurse.  -}
-    toSquealSelectWithParens swp
+    toSquealSelectWithParens cteNames maybeColAliases swp
 
 
-toSquealSelectNoParens :: PGT_AST.SelectNoParens -> Q Exp
 toSquealSelectNoParens
+  :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
+  -> PGT_AST.SelectNoParens
+  -> Q Exp
+toSquealSelectNoParens
+  initialCteNames
+  maybeColAliases
   ( PGT_AST.SelectNoParens
       maybeWithClause
       selectClause
@@ -54,9 +69,9 @@ toSquealSelectNoParens
     ) = do
     (cteNames, renderedWithClause) <-
       case maybeWithClause of
-        Nothing -> pure ([], Nothing)
+        Nothing -> pure (initialCteNames, Nothing)
         Just withClause -> do
-          (names, exp) <- renderPGTWithClause withClause
+          (names, exp) <- renderPGTWithClause initialCteNames withClause
           pure (names, Just exp)
 
     squealQueryBody <-
@@ -64,49 +79,65 @@ toSquealSelectNoParens
         Left simpleSelect ->
           toSquealSimpleSelect
             cteNames
+            maybeColAliases
             simpleSelect
             maybeSortClause
             maybeSelectLimit
             maybeForLockingClause
-        Right selectWithParens' -> toSquealSelectWithParens selectWithParens'
+        Right selectWithParens' -> toSquealSelectWithParens cteNames maybeColAliases selectWithParens'
 
     case renderedWithClause of
       Nothing -> pure squealQueryBody
       Just withExp -> pure $ VarE 'S.with `AppE` withExp `AppE` squealQueryBody
 
 
-renderPGTWithClause :: PGT_AST.WithClause -> Q ([Text.Text], Exp)
-renderPGTWithClause (PGT_AST.WithClause recursive ctes) = do
-  when recursive $ fail "Recursive WITH clauses are not supported yet."
-  let cteList = NE.toList ctes
-  cteNames <- mapM getCteName cteList
-  renderedCtes <- mapM renderCte cteList
-  let withExp =
+renderPGTWithClause :: [Text.Text] -> PGT_AST.WithClause -> Q ([Text.Text], Exp)
+renderPGTWithClause initialCteNames (PGT_AST.WithClause recursive ctes) = do
+    when recursive $ fail "Recursive WITH clauses are not supported yet."
+    let
+      cteList = NE.toList ctes
+    (finalCteNames, renderedCtes) <-
+      foldlM
+        ( \(names, exps) cte -> do
+            (name, exp) <- renderCte names cte
+            pure (names <> [name], exps <> [exp])
+        )
+        (initialCteNames, [])
+        cteList
+
+    let
+      withExp =
         foldr
           (\cte acc -> ConE '(S.:>>) `AppE` cte `AppE` acc)
           (ConE 'S.Done)
           renderedCtes
-  pure (cteNames, withExp)
+    pure (finalCteNames, withExp)
   where
-    getCteName (PGT_AST.CommonTableExpr ident _ _ _) = pure $ getIdentText ident
-    renderCte (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
-      when (isJust maybeColNames) $ fail "Column name lists in CTEs are not supported yet."
-      when (isJust maybeMaterialized) $ fail "MATERIALIZED/NOT MATERIALIZED for CTEs is not supported yet."
-      cteQueryExp <- case stmt of
-        PGT_AST.SelectPreparableStmt selectStmt -> toSquealQuery selectStmt
-        _ -> fail "Only SELECT statements are supported in CTEs."
-      let cteName = getIdentText ident
-      pure $ VarE 'S.as `AppE` cteQueryExp `AppE` LabelE (Text.unpack cteName)
+    renderCte :: [Text.Text] -> PGT_AST.CommonTableExpr -> Q (Text.Text, Exp)
+    renderCte existingCteNames (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
+      when (isJust maybeColNames) $
+        fail "Column name lists in CTEs are not supported yet."
+      when (isJust maybeMaterialized) $
+        fail "MATERIALIZED/NOT MATERIALIZED for CTEs is not supported yet."
+      cteQueryExp <-
+        case stmt of
+          PGT_AST.SelectPreparableStmt selectStmt -> toSquealQuery existingCteNames Nothing selectStmt
+          _ -> fail "Only SELECT statements are supported in CTEs."
+      let
+        cteName = getIdentText ident
+      pure
+        (cteName, VarE 'S.as `AppE` cteQueryExp `AppE` LabelE (Text.unpack cteName))
 
 
 toSquealSimpleSelect
   :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
   -> PGT_AST.SimpleSelect
   -> Maybe PGT_AST.SortClause
   -> Maybe PGT_AST.SelectLimit
   -> Maybe PGT_AST.ForLockingClause
   -> Q Exp
-toSquealSimpleSelect cteNames simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
+toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
     PGT_AST.ValuesSimpleSelect valuesClause -> do
       unless
@@ -117,7 +148,7 @@ toSquealSimpleSelect cteNames simpleSelect maybeSortClause maybeSelectLimit mayb
         $ fail
         $ "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
           <> "in this translation yet."
-      renderedValues <- renderValuesClauseToNP valuesClause
+      renderedValues <- renderValuesClauseToNP maybeColAliases valuesClause
       pure $ VarE 'S.values_ `AppE` renderedValues
     PGT_AST.NormalSimpleSelect
       maybeTargeting
@@ -272,27 +303,39 @@ toSquealSimpleSelect cteNames simpleSelect maybeSortClause maybeSelectLimit mayb
 
 -- Helper for VALUES clause: Assumes S.values_ for a single row of values.
 -- PGT_AST.ValuesClause is NonEmpty (NonEmpty PGT_AST.AExpr)
-renderValuesClauseToNP :: PGT_AST.ValuesClause -> Q Exp
-renderValuesClauseToNP (firstRowExps NE.:| restRowExps) = do
+renderValuesClauseToNP
+  :: Maybe (NE.NonEmpty PGT_AST.Ident) -> PGT_AST.ValuesClause -> Q Exp
+renderValuesClauseToNP maybeColAliases (firstRowExps NE.:| restRowExps) = do
     unless (null restRowExps) $
       fail $
         "Multi-row VALUES clause requires S.values, this translation "
           <> "currently supports single row S.values_."
     convertRowToNP firstRowExps
   where
+    colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
+
     convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
-    convertRowToNP exprs =
-        go (NE.toList exprs) 1
+    convertRowToNP exprs = do
+        let
+          exprList = NE.toList exprs
+        aliasTexts <-
+          case colAliasTexts of
+            Just aliases ->
+              if length aliases == length exprList
+                then pure aliases
+                else
+                  fail
+                    "Number of column aliases in CTE does not match number of columns in VALUES clause."
+            Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
+        go (zip exprList aliasTexts)
       where
-        go :: [PGT_AST.AExpr] -> Int -> Q Exp
-        go [] _ = pure $ ConE 'S.Nil
-        go (expr : fs) idx = do
+        go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
+        go [] = pure $ ConE 'S.Nil
+        go ((expr, aliasText) : fs) = do
           renderedExpr <- renderPGTAExpr expr
           let
-            aliasText = "_column" <> show idx -- Default alias for VALUES
-            aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE aliasText
-          restExp <- go fs (idx + 1) -- restExp is Exp here
-          -- Correct construction: aliasedExp :* restExp
+            aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
+          restExp <- go fs
           pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
 
 

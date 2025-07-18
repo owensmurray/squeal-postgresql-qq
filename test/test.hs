@@ -886,6 +886,23 @@ main =
                 "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, (E'user-1' :: text), (E'foo@bar' :: text)) RETURNING *"
             checkStatement squealRendering statement
 
+      describe "with common table expressions" $ do
+        it
+          "with new_user (id, name, bio) as (values ('id_new', 'new_name', 'new_bio')) insert into users_copy select * from new_user"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with new_user (id, name, bio) as (values ('id_new', 'new_name', 'new_bio'))
+                  insert into users_copy
+                  select * from new_user
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"new_user\" AS (SELECT * FROM (VALUES ((E'id_new' :: text), (E'new_name' :: text), (E'new_bio' :: text))) AS t (\"id\", \"name\", \"bio\")) INSERT INTO \"users_copy\" AS \"users_copy\" SELECT * FROM \"new_user\" AS \"new_user\""
+            checkStatement squealRendering statement
+
     describe "deletes" $ do
       it "delete from users where true" $ do
         let

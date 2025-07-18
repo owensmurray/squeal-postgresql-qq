@@ -22,8 +22,8 @@ import Language.Haskell.TH.Quote
   )
 import Language.Haskell.TH.Syntax (Exp(AppE, VarE), Q, runIO)
 import Prelude
-  ( Applicative(pure), Either(Left, Right), MonadFail(fail), Semigroup((<>))
-  , Show(show), ($), (.), String, error, print
+  ( Applicative(pure), Either(Left, Right), Maybe(Nothing), MonadFail(fail)
+  , Semigroup((<>)), Show(show), ($), (.), String, error, print
   )
 import Squeal.QuasiQuotes.Delete (toSquealDelete)
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
@@ -161,7 +161,7 @@ toSqueal = \case
 toSquealStatement :: PGT_AST.PreparableStmt -> Q Exp
 toSquealStatement = \case
   PGT_AST.SelectPreparableStmt theQuery -> do
-    queryExp <- toSquealQuery theQuery
+    queryExp <- toSquealQuery [] Nothing theQuery
     pure $ VarE 'monoQuery `AppE` queryExp
   PGT_AST.InsertPreparableStmt stmt -> do
     manipExp <- toSquealInsert stmt
