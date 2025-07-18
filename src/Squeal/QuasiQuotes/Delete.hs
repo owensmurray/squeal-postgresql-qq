@@ -41,7 +41,7 @@ toSquealDelete
     usingClauseExp <-
       case maybeUsingClause of
         Nothing -> pure $ ConE 'S.NoUsing
-        Just usingClause -> AppE (ConE 'S.Using) <$> renderPGTTableRef usingClause
+        Just usingClause -> AppE (ConE 'S.Using) <$> renderPGTTableRef [] usingClause
 
     whereConditionExp <-
       case maybeWhereClause of

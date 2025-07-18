@@ -558,6 +558,61 @@ main =
               "SELECT \"employee_id\" AS \"employee_id\", \"name\" AS \"name\", count(ALL \"id\") AS \"_col3\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\", \"name\""
           checkStatement squealRendering statement
 
+      describe "common table expressions" $ do
+        it "with users_cte as (select * from users) select * from users_cte" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "id" Text
+                   , ( Field "name" Text
+                     , ( Field "employee_id" UUID
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
+                       )
+                     )
+                   )
+            statement = [ssql| with users_cte as (select * from users) select * from users_cte |]
+            squealRendering :: Text
+            squealRendering =
+              "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\") SELECT * FROM \"users_cte\" AS \"users_cte\""
+          checkStatement squealRendering statement
+
+        it
+          "with users_cte as (select * from users), emails_cte as (select * from emails) select users_cte.*, emails_cte.email from users_cte join emails_cte on users_cte.id = emails_cte.user_id"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "id" Text
+                     , ( Field "name" Text
+                       , ( Field "employee_id" UUID
+                         , ( Field "bio" (Maybe Text)
+                           , ( Field "email" (Maybe Text)
+                             , ()
+                             )
+                           )
+                         )
+                       )
+                     )
+              statement =
+                [ssql|
+                  with
+                    users_cte as (select * from users),
+                    emails_cte as (select * from emails)
+                  select users_cte.*, emails_cte.email
+                  from users_cte
+                  join emails_cte on users_cte.id = emails_cte.user_id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\"), \"emails_cte\" AS (SELECT * FROM \"emails\" AS \"emails\") SELECT \"users_cte\".*, \"emails_cte\".\"email\" AS \"email\" FROM \"users_cte\" AS \"users_cte\" INNER JOIN \"emails_cte\" AS \"emails_cte\" ON (\"users_cte\".\"id\" = \"emails_cte\".\"user_id\")"
+            checkStatement squealRendering statement
+
     describe "inserts" $ do
       it "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar')" $ do
         let

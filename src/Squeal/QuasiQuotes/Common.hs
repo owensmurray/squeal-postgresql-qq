@@ -43,9 +43,9 @@ getIdentText = \case
   PGT_AST.UnquotedIdent t -> t
 
 
-renderPGTTableRef :: NE.NonEmpty PGT_AST.TableRef -> Q Exp
-renderPGTTableRef tableRefs = do
-  renderedTableRefs <- mapM renderSingleTableRef (NE.toList tableRefs)
+renderPGTTableRef :: [Text.Text] -> NE.NonEmpty PGT_AST.TableRef -> Q Exp
+renderPGTTableRef cteNames tableRefs = do
+  renderedTableRefs <- mapM (renderSingleTableRef cteNames) (NE.toList tableRefs)
   case renderedTableRefs of
     [] -> fail "Empty FROM clause" -- Should not happen with NonEmpty
     (firstTbl : restTbls) ->
@@ -57,11 +57,11 @@ renderPGTTableRef tableRefs = do
       pure $ foldl' (\acc tbl -> VarE 'S.also `AppE` tbl `AppE` acc) firstTbl restTbls
 
 
-renderSingleTableRef :: PGT_AST.TableRef -> Q Exp
-renderSingleTableRef = \case
+renderSingleTableRef :: [Text.Text] -> PGT_AST.TableRef -> Q Exp
+renderSingleTableRef cteNames = \case
   PGT_AST.RelationExprTableRef relationExpr maybeAliasClause sampleClause -> do
     when (isJust sampleClause) $ fail "TABLESAMPLE clause is not supported yet."
-    renderPGTRelationExprTableRef relationExpr maybeAliasClause
+    renderPGTRelationExprTableRef cteNames relationExpr maybeAliasClause
   PGT_AST.JoinTableRef joinedTable maybeAliasClause ->
     -- If `maybeAliasClause` is Just, it means `(JOIN_TABLE) AS alias`.
     -- Squeal's direct join combinators don't alias the *result* of the join.
@@ -72,19 +72,19 @@ renderSingleTableRef = \case
       Just _ ->
         fail
           "Aliasing a JOIN clause directly is not supported. Consider a subquery: (SELECT * FROM ...) AS alias"
-      Nothing -> renderPGTJoinedTable joinedTable
+      Nothing -> renderPGTJoinedTable cteNames joinedTable
   -- PGT_AST.InParensTableRefTableRef was an incorrect pattern, removing it.
   -- Parenthesized joins are handled by PGT_AST.InParensJoinedTable within renderPGTJoinedTable.
   unsupported ->
     fail $ "Unsupported TableRef type in renderSingleTableRef: " <> show unsupported
 
 
-renderPGTJoinedTable :: PGT_AST.JoinedTable -> Q Exp
-renderPGTJoinedTable = \case
-  PGT_AST.InParensJoinedTable joinedTable -> renderPGTJoinedTable joinedTable
+renderPGTJoinedTable :: [Text.Text] -> PGT_AST.JoinedTable -> Q Exp
+renderPGTJoinedTable cteNames = \case
+  PGT_AST.InParensJoinedTable joinedTable -> renderPGTJoinedTable cteNames joinedTable
   PGT_AST.MethJoinedTable joinMeth leftRef rightRef -> do
-    leftTableExp <- renderSingleTableRef leftRef
-    rightTableExp <- renderSingleTableRef rightRef
+    leftTableExp <- renderSingleTableRef cteNames leftRef
+    rightTableExp <- renderSingleTableRef cteNames rightRef
     case joinMeth of
       PGT_AST.QualJoinMeth maybeJoinType joinQual ->
         case joinQual of
@@ -121,17 +121,22 @@ renderPGTJoinedTable = \case
 
 
 renderPGTRelationExprTableRef
-  :: PGT_AST.RelationExpr -> Maybe PGT_AST.AliasClause -> Q Exp
-renderPGTRelationExprTableRef relationExpr maybeAliasClause = do
-  tableExpr <-
+  :: [Text.Text] -> PGT_AST.RelationExpr -> Maybe PGT_AST.AliasClause -> Q Exp
+renderPGTRelationExprTableRef cteNames relationExpr maybeAliasClause = do
+  (tableName, schemaName) <-
     case relationExpr of
-      PGT_AST.SimpleRelationExpr qualifiedName isAsterisk -> do
-        when isAsterisk $ fail "Relation with '*' (e.g. 'table *') is not supported."
-        renderPGTQualifiedName qualifiedName
-      PGT_AST.OnlyRelationExpr _qualifiedName _areParensPresent -> do
-        -- Squeal doesn't have a direct equivalent for ONLY, so we treat it as a normal table for now.
-        -- This might need adjustment if ONLY semantics are critical.
-        fail "ONLY keyword is not supported."
+      PGT_AST.SimpleRelationExpr (PGT_AST.SimpleQualifiedName ident) _ ->
+        pure (getIdentText ident, Nothing)
+      PGT_AST.SimpleRelationExpr
+        ( PGT_AST.IndirectedQualifiedName
+            schemaIdent
+            (NE.last -> PGT_AST.AttrNameIndirectionEl tableIdent)
+          )
+        _ ->
+          pure (getIdentText tableIdent, Just (getIdentText schemaIdent))
+      _ ->
+        fail $
+          "Unsupported relation expression: " <> show relationExpr
 
   aliasStr <-
     case maybeAliasClause of
@@ -148,22 +153,24 @@ renderPGTRelationExprTableRef relationExpr maybeAliasClause = do
           fail $
             "Cannot determine default alias for relation expression: " <> show relationExpr
 
-  pure $ VarE 'S.table `AppE` (VarE 'S.as `AppE` tableExpr `AppE` LabelE aliasStr)
+  let
+    isCte = tableName `elem` cteNames
+    squealFn = if isCte then VarE 'S.common else VarE 'S.table
 
+  tableExpr <-
+    case schemaName of
+      Nothing -> pure $ LabelE (Text.unpack tableName)
+      Just schema ->
+        if isCte
+          then
+            fail "CTEs cannot be schema-qualified."
+          else
+            pure $
+              VarE '(S.!)
+                `AppE` LabelE (Text.unpack schema)
+                `AppE` LabelE (Text.unpack tableName)
 
-renderPGTQualifiedName :: PGT_AST.QualifiedName -> Q Exp
-renderPGTQualifiedName = \case
-  PGT_AST.SimpleQualifiedName ident -> pure $ LabelE (Text.unpack (getIdentText ident))
-  PGT_AST.IndirectedQualifiedName
-    schemaIdent
-    (PGT_AST.AttrNameIndirectionEl colIdent NE.:| []) ->
-      -- Assuming schema.table.col
-      pure $
-        VarE '(S.!)
-          `AppE` LabelE (Text.unpack (getIdentText schemaIdent))
-          `AppE` LabelE (Text.unpack (getIdentText colIdent))
-  unsupported ->
-    fail $ "Unsupported qualified name for table reference: " <> show unsupported
+  pure $ squealFn `AppE` (VarE 'S.as `AppE` tableExpr `AppE` LabelE aliasStr)
 
 
 -- | Defines associativity of an operator.

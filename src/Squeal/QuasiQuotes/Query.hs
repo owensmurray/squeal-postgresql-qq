@@ -52,24 +52,61 @@ toSquealSelectNoParens
       maybeSelectLimit
       maybeForLockingClause
     ) = do
-    when (isJust maybeWithClause) $ fail "WITH clauses are not supported yet."
-    case selectClause of
-      Left simpleSelect ->
-        toSquealSimpleSelect
-          simpleSelect
-          maybeSortClause
-          maybeSelectLimit
-          maybeForLockingClause
-      Right selectWithParens' -> toSquealSelectWithParens selectWithParens'
+    (cteNames, renderedWithClause) <-
+      case maybeWithClause of
+        Nothing -> pure ([], Nothing)
+        Just withClause -> do
+          (names, exp) <- renderPGTWithClause withClause
+          pure (names, Just exp)
+
+    squealQueryBody <-
+      case selectClause of
+        Left simpleSelect ->
+          toSquealSimpleSelect
+            cteNames
+            simpleSelect
+            maybeSortClause
+            maybeSelectLimit
+            maybeForLockingClause
+        Right selectWithParens' -> toSquealSelectWithParens selectWithParens'
+
+    case renderedWithClause of
+      Nothing -> pure squealQueryBody
+      Just withExp -> pure $ VarE 'S.with `AppE` withExp `AppE` squealQueryBody
+
+
+renderPGTWithClause :: PGT_AST.WithClause -> Q ([Text.Text], Exp)
+renderPGTWithClause (PGT_AST.WithClause recursive ctes) = do
+  when recursive $ fail "Recursive WITH clauses are not supported yet."
+  let cteList = NE.toList ctes
+  cteNames <- mapM getCteName cteList
+  renderedCtes <- mapM renderCte cteList
+  let withExp =
+        foldr
+          (\cte acc -> ConE '(S.:>>) `AppE` cte `AppE` acc)
+          (ConE 'S.Done)
+          renderedCtes
+  pure (cteNames, withExp)
+  where
+    getCteName (PGT_AST.CommonTableExpr ident _ _ _) = pure $ getIdentText ident
+    renderCte (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
+      when (isJust maybeColNames) $ fail "Column name lists in CTEs are not supported yet."
+      when (isJust maybeMaterialized) $ fail "MATERIALIZED/NOT MATERIALIZED for CTEs is not supported yet."
+      cteQueryExp <- case stmt of
+        PGT_AST.SelectPreparableStmt selectStmt -> toSquealQuery selectStmt
+        _ -> fail "Only SELECT statements are supported in CTEs."
+      let cteName = getIdentText ident
+      pure $ VarE 'S.as `AppE` cteQueryExp `AppE` LabelE (Text.unpack cteName)
 
 
 toSquealSimpleSelect
-  :: PGT_AST.SimpleSelect
+  :: [Text.Text]
+  -> PGT_AST.SimpleSelect
   -> Maybe PGT_AST.SortClause
   -> Maybe PGT_AST.SelectLimit
   -> Maybe PGT_AST.ForLockingClause
   -> Q Exp
-toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
+toSquealSimpleSelect cteNames simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
     PGT_AST.ValuesSimpleSelect valuesClause -> do
       unless
@@ -140,7 +177,7 @@ toSquealSimpleSelect simpleSelect maybeSortClause maybeSelectLimit maybeForLocki
                     "WINDOW clause is not yet supported in this translation "
                       <> "for NormalSimpleSelect with FROM."
 
-                renderedFromClauseExp <- renderPGTTableRef fromClause
+                renderedFromClauseExp <- renderPGTTableRef cteNames fromClause
                 let
                   baseTableExpr = VarE 'S.from `AppE` renderedFromClauseExp
 

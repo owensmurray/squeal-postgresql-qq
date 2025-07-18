@@ -44,7 +44,7 @@ toSquealUpdate
     usingClauseExp <-
       case maybeFromClause of
         Nothing -> pure $ ConE 'S.NoUsing
-        Just fromClause -> AppE (ConE 'S.Using) <$> renderPGTTableRef fromClause
+        Just fromClause -> AppE (ConE 'S.Using) <$> renderPGTTableRef [] fromClause
 
     whereConditionExp <-
       case maybeWhereClause of
