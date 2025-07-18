@@ -41,7 +41,6 @@ library
   exposed-modules:     
     Squeal.QuasiQuotes
   other-modules:
-    Squeal.QuasiQuotes.Common
     Squeal.QuasiQuotes.Delete
     Squeal.QuasiQuotes.Insert
     Squeal.QuasiQuotes.Query

@@ -8,15 +8,15 @@ module Squeal.QuasiQuotes.Update (
   toSquealUpdate,
 ) where
 
-import Data.Text (Text)
 import Control.Monad (when)
 import Data.Maybe (isJust)
+import Data.Text (Text)
 import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Prelude
   ( Applicative(pure), Foldable(foldr), Maybe(Just, Nothing), MonadFail(fail)
   , Traversable(mapM), ($), (<$>)
   )
-import Squeal.QuasiQuotes.Common
+import Squeal.QuasiQuotes.Query
   ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargetList
   )
 import qualified Data.List.NonEmpty as NE
@@ -118,7 +118,8 @@ renderPGTSetClause = \case
   PGT_AST.TargetSetClause (PGT_AST.SetTarget colId maybeIndirection) aExpr -> do
     when (isJust maybeIndirection) $
       fail "UPDATE SET with indirection (e.g., array access) is not supported."
-    let colNameStr = Text.unpack (getIdentText colId)
+    let
+      colNameStr = Text.unpack (getIdentText colId)
     renderedExpr <- renderPGTAExpr aExpr
     pure $
       VarE 'S.as

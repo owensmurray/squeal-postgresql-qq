@@ -16,8 +16,7 @@ import Prelude
   ( Applicative(pure), Either(Left), Eq((/=)), Maybe(Just, Nothing)
   , Semigroup((<>)), Show(show), ($), (.), error, otherwise
   )
-import Squeal.QuasiQuotes.Common (getIdentText, renderPGTAExpr)
-import Squeal.QuasiQuotes.Query (toSquealQuery)
+import Squeal.QuasiQuotes.Query (getIdentText, renderPGTAExpr, toSquealQuery)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST

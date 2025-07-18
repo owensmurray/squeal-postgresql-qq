@@ -14,8 +14,9 @@ import Language.Haskell.TH.Syntax (Exp(AppE, ConE, LabelE, VarE), Q)
 import Prelude
   ( Applicative(pure), Maybe(Just, Nothing), MonadFail(fail), ($), (<$>)
   )
-import Squeal.QuasiQuotes.Common
-  ( getIdentText, renderPGTAExpr, renderPGTTableRef, renderPGTTargetList
+import Squeal.QuasiQuotes.Query (renderPGTAExpr)
+import Squeal.QuasiQuotes.Query
+  ( getIdentText, renderPGTTableRef, renderPGTTargetList
   )
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
