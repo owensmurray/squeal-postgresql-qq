@@ -51,13 +51,13 @@ toSquealUpdate
         Nothing ->
           fail
             "UPDATE statements must have a WHERE clause for safety. Use WHERE TRUE to update all rows."
-        Just (PGT_AST.ExprWhereOrCurrentClause whereAExpr) -> renderPGTAExpr whereAExpr
+        Just (PGT_AST.ExprWhereOrCurrentClause whereAExpr) -> renderPGTAExpr [] whereAExpr
         Just (PGT_AST.CursorWhereOrCurrentClause _) -> fail "WHERE CURRENT OF is not supported."
 
     returningClauseExp <-
       case maybeReturningClause of
         Nothing -> pure $ ConE 'S.Returning_ `AppE` ConE 'S.Nil
-        Just returningClause -> AppE (ConE 'S.Returning) <$> renderPGTTargetList returningClause
+        Just returningClause -> AppE (ConE 'S.Returning) <$> renderPGTTargetList [] returningClause
 
     pure $
       ( VarE 'S.update
@@ -120,7 +120,7 @@ renderPGTSetClause = \case
       fail "UPDATE SET with indirection (e.g., array access) is not supported."
     let
       colNameStr = Text.unpack (getIdentText colId)
-    renderedExpr <- renderPGTAExpr aExpr
+    renderedExpr <- renderPGTAExpr [] aExpr
     pure $
       VarE 'S.as
         `AppE` (ConE 'S.Set `AppE` renderedExpr)

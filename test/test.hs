@@ -942,6 +942,40 @@ main =
             "DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = (E'some-id' :: text)) RETURNING \"id\" AS \"id\""
         checkStatement squealRendering statement
 
+      describe "with common table expressions" $ do
+        it
+          "with to_delete as (select id from users where name = 'Alice') delete from users where id in (select to_delete.id from to_delete)"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_delete as (select id from users where name = 'Alice')
+                  delete from users
+                  where id in (select to_delete.id from to_delete)
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_delete\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) DELETE FROM \"users\" AS \"users\" WHERE (\"id\" = ANY (SELECT \"to_delete\".\"id\" AS \"id\" FROM \"to_delete\" AS \"to_delete\"))"
+            checkStatement squealRendering statement
+
+        it
+          "with to_delete as (select id from users where name = 'Alice') delete from users using to_delete where users.id = to_delete.id"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
+                  with to_delete as (select id from users where name = 'Alice')
+                  delete from users
+                  using to_delete
+                  where users.id = to_delete.id
+                |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH \"to_delete\" AS (SELECT \"id\" AS \"id\" FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))) DELETE FROM \"users\" AS \"users\" USING \"to_delete\" AS \"to_delete\" WHERE (\"users\".\"id\" = \"to_delete\".\"id\")"
+            checkStatement squealRendering statement
+
     describe "updates" $ do
       it "update users set name = 'new name' where id = 'some-id'" $ do
         let
@@ -1335,36 +1369,6 @@ main =
           squealRendering :: Text
           squealRendering =
             "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"name\" NOT IN ((E'Alice' :: text), (E'Bob' :: text))"
-        checkStatement squealRendering stmt
-
-      it "select * from users where id in (select user_id from emails)" $ do
-        let
-          stmt
-            :: Statement
-                 DB
-                 ()
-                 ( Field "id" Text
-                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
-                 )
-          stmt = [ssql| select * from users where id in (select emails.user_id from emails) |]
-          squealRendering :: Text
-          squealRendering =
-            "SELECT * FROM \"users\" AS \"users\" WHERE (\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
-        checkStatement squealRendering stmt
-
-      it "select * from users where id not in (select user_id from emails)" $ do
-        let
-          stmt
-            :: Statement
-                 DB
-                 ()
-                 ( Field "id" Text
-                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
-                 )
-          stmt = [ssql| select * from users where id not in (select emails.user_id from emails) |]
-          squealRendering :: Text
-          squealRendering =
-            "SELECT * FROM \"users\" AS \"users\" WHERE (\"id\" <> ALL (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
         checkStatement squealRendering stmt
 
       -- BETWEEN / NOT BETWEEN

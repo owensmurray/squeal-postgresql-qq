@@ -157,7 +157,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
         $ fail
         $ "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
           <> "in this translation yet."
-      renderedValues <- renderValuesClauseToNP maybeColAliases valuesClause
+      renderedValues <- renderValuesClauseToNP cteNames maybeColAliases valuesClause
       pure $ VarE 'S.values_ `AppE` renderedValues
     PGT_AST.NormalSimpleSelect
       maybeTargeting
@@ -195,7 +195,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                     -- Case: SELECT <targeting_list> (no FROM, no other clauses)
                     -- Translate to S.values_
                     renderedTargetingForValues <-
-                      renderPGTTargetingForValues targeting
+                      renderPGTTargetingForValues cteNames targeting
                     pure $
                       VarE 'S.values_ `AppE` renderedTargetingForValues
               (Nothing, _, _, _, _, _, _) ->
@@ -225,7 +225,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                   case maybeWhereClause of
                     Nothing -> pure baseTableExpr
                     Just wc -> do
-                      renderedWC <- renderPGTAExpr wc
+                      renderedWC <- renderPGTAExpr cteNames wc
                       pure $
                         InfixE
                           (Just baseTableExpr)
@@ -233,7 +233,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                           (Just (AppE (VarE 'S.where_) renderedWC))
 
                 tableExprWithGroupBy <-
-                  applyPGTGroupBy tableExprWithWhere maybeGroupClause
+                  applyPGTGroupBy cteNames tableExprWithWhere maybeGroupClause
 
                 tableExprWithHaving <-
                   case maybeHavingClause of
@@ -241,7 +241,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                     Just hc -> do
                       when (isNothing maybeGroupClause) $
                         fail "HAVING clause requires a GROUP BY clause."
-                      renderedHC <- renderPGTAExpr hc
+                      renderedHC <- renderPGTAExpr cteNames hc
                       pure $
                         InfixE
                           (Just tableExprWithGroupBy)
@@ -252,7 +252,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                   case maybeSortClause of
                     Nothing -> pure tableExprWithHaving
                     Just sortClause -> do
-                      renderedSC <- renderPGTSortClause sortClause
+                      renderedSC <- renderPGTSortClause cteNames sortClause
                       pure $
                         InfixE
                           (Just tableExprWithHaving)
@@ -260,7 +260,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                           (Just (AppE (VarE 'S.orderBy) renderedSC))
 
                 (tableExprWithOffset, mTableExprWithLimit) <-
-                  processSelectLimit tableExprWithOrderBy maybeSelectLimit
+                  processSelectLimit cteNames tableExprWithOrderBy maybeSelectLimit
 
                 let
                   baseFinalTableExpr =
@@ -284,7 +284,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                           lockingClauseExps
 
                 (selectionTargetExp, maybeDistinctOnExprs) <-
-                  renderPGTTargeting targeting
+                  renderPGTTargeting cteNames targeting
 
                 squealSelectFn <-
                   case maybeDistinctOnExprs of
@@ -295,7 +295,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                         _ -> pure $ VarE 'S.select -- Normal or ALL
                     Just distinctOnAstExprs -> do
                       distinctOnSquealSortExps <-
-                        renderPGTOnExpressionsClause distinctOnAstExprs
+                        renderPGTOnExpressionsClause cteNames distinctOnAstExprs
                       pure $
                         VarE 'S.selectDistinctOn
                           `AppE` distinctOnSquealSortExps
@@ -313,39 +313,42 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
 -- Helper for VALUES clause: Assumes S.values_ for a single row of values.
 -- PGT_AST.ValuesClause is NonEmpty (NonEmpty PGT_AST.AExpr)
 renderValuesClauseToNP
-  :: Maybe (NE.NonEmpty PGT_AST.Ident) -> PGT_AST.ValuesClause -> Q Exp
-renderValuesClauseToNP maybeColAliases (firstRowExps NE.:| restRowExps) = do
-    unless (null restRowExps) $
-      fail $
-        "Multi-row VALUES clause requires S.values, this translation "
-          <> "currently supports single row S.values_."
-    convertRowToNP firstRowExps
-  where
-    colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
+  :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
+  -> PGT_AST.ValuesClause
+  -> Q Exp
+renderValuesClauseToNP cteNames maybeColAliases (firstRowExps NE.:| restRowExps) = do
+  unless (null restRowExps) $
+    fail $
+      "Multi-row VALUES clause requires S.values, this translation "
+        <> "currently supports single row S.values_."
+  convertRowToNP firstRowExps
+ where
+  colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
 
-    convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
-    convertRowToNP exprs = do
-        let
-          exprList = NE.toList exprs
-        aliasTexts <-
-          case colAliasTexts of
-            Just aliases ->
-              if length aliases == length exprList
-                then pure aliases
-                else
-                  fail
-                    "Number of column aliases in CTE does not match number of columns in VALUES clause."
-            Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
-        go (zip exprList aliasTexts)
-      where
-        go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
-        go [] = pure $ ConE 'S.Nil
-        go ((expr, aliasText) : fs) = do
-          renderedExpr <- renderPGTAExpr expr
-          let
-            aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
-          restExp <- go fs
-          pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
+  convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
+  convertRowToNP exprs = do
+    let
+      exprList = NE.toList exprs
+    aliasTexts <-
+      case colAliasTexts of
+        Just aliases ->
+          if length aliases == length exprList
+            then pure aliases
+            else
+              fail
+                "Number of column aliases in CTE does not match number of columns in VALUES clause."
+        Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
+    go (zip exprList aliasTexts)
+   where
+    go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
+    go [] = pure $ ConE 'S.Nil
+    go ((expr, aliasText) : fs) = do
+      renderedExpr <- renderPGTAExpr cteNames expr
+      let
+        aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
+      restExp <- go fs
+      pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
 
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
@@ -412,42 +415,42 @@ renderPGTWaiting = \case
   Just True -> pure $ ConE 'S.SkipLocked -- SKIP LOCKED
 
 
-applyPGTGroupBy :: Exp -> Maybe PGT_AST.GroupClause -> Q Exp
-applyPGTGroupBy currentTableExpr = \case
-    Nothing -> pure currentTableExpr
-    Just groupClause -> do
-      renderedGB <- renderPGTGroupByClauseElements groupClause
-      pure $
-        InfixE
-          (Just currentTableExpr)
-          (VarE '(S.&))
-          (Just (AppE (VarE 'S.groupBy) renderedGB))
-  where
-    renderPGTGroupByClauseElements :: PGT_AST.GroupClause -> Q Exp
-    renderPGTGroupByClauseElements = \case
-      PGT_AST.EmptyGroupingSetGroupByItem NE.:| [] ->
-        pure $ ConE 'S.Nil
-      groupByItems -> do
-        renderedExprs <- mapM renderPGTGroupByItem (NE.toList groupByItems)
-        pure $
-          foldr
-            (\expr acc -> ConE '(S.:*) `AppE` expr `AppE` acc)
-            (ConE 'S.Nil)
-            renderedExprs
+applyPGTGroupBy :: [Text.Text] -> Exp -> Maybe PGT_AST.GroupClause -> Q Exp
+applyPGTGroupBy cteNames currentTableExpr = \case
+  Nothing -> pure currentTableExpr
+  Just groupClause -> do
+    renderedGB <- renderPGTGroupByClauseElements cteNames groupClause
+    pure $
+      InfixE
+        (Just currentTableExpr)
+        (VarE '(S.&))
+        (Just (AppE (VarE 'S.groupBy) renderedGB))
 
 
-renderPGTGroupByItem :: PGT_AST.GroupByItem -> Q Exp
-renderPGTGroupByItem = \case
-  PGT_AST.ExprGroupByItem scalarExpr -> renderPGTAExpr scalarExpr
+renderPGTGroupByClauseElements :: [Text.Text] -> PGT_AST.GroupClause -> Q Exp
+renderPGTGroupByClauseElements cteNames = \case
+  PGT_AST.EmptyGroupingSetGroupByItem NE.:| [] ->
+    pure $ ConE 'S.Nil
+  groupByItems -> do
+    renderedExprs <- mapM (renderPGTGroupByItem cteNames) (NE.toList groupByItems)
+    pure $
+      foldr
+        (\expr acc -> ConE '(S.:*) `AppE` expr `AppE` acc)
+        (ConE 'S.Nil)
+        renderedExprs
+
+renderPGTGroupByItem :: [Text.Text] -> PGT_AST.GroupByItem -> Q Exp
+renderPGTGroupByItem cteNames = \case
+  PGT_AST.ExprGroupByItem scalarExpr -> renderPGTAExpr cteNames scalarExpr
   PGT_AST.EmptyGroupingSetGroupByItem -> pure (ConE 'S.Nil)
   unsupportedGroup ->
     fail $
       "Unsupported grouping expression: " <> show unsupportedGroup
 
 
-processSelectLimit :: Exp -> Maybe PGT_AST.SelectLimit -> Q (Exp, Maybe Exp)
-processSelectLimit tableExpr Nothing = pure (tableExpr, Nothing)
-processSelectLimit tableExpr (Just selectLimit) = do
+processSelectLimit :: [Text.Text] -> Exp -> Maybe PGT_AST.SelectLimit -> Q (Exp, Maybe Exp)
+processSelectLimit _cteNames tableExpr Nothing = pure (tableExpr, Nothing)
+processSelectLimit cteNames tableExpr (Just selectLimit) = do
   let
     (maybeOffsetClause, maybeLimitClause) = case selectLimit of
       PGT_AST.LimitOffsetSelectLimit lim off -> (Just off, Just lim)
@@ -459,7 +462,7 @@ processSelectLimit tableExpr (Just selectLimit) = do
     case maybeOffsetClause of
       Nothing -> pure tableExpr
       Just offsetVal -> do
-        offsetExp <- renderPGTOffsetClause offsetVal
+        offsetExp <- renderPGTOffsetClause cteNames offsetVal
         pure $
           InfixE
             (Just tableExpr)
@@ -469,7 +472,7 @@ processSelectLimit tableExpr (Just selectLimit) = do
   case maybeLimitClause of
     Nothing -> pure (tableExprWithOffset, Nothing)
     Just limitVal -> do
-      limitExp <- renderPGTLimitClause limitVal
+      limitExp <- renderPGTLimitClause cteNames limitVal
       pure
         ( tableExprWithOffset
         , Just
@@ -481,8 +484,8 @@ processSelectLimit tableExpr (Just selectLimit) = do
         )
 
 
-renderPGTLimitClause :: PGT_AST.LimitClause -> Q Exp
-renderPGTLimitClause = \case
+renderPGTLimitClause :: [Text.Text] -> PGT_AST.LimitClause -> Q Exp
+renderPGTLimitClause cteNames = \case
   PGT_AST.LimitLimitClause slValue mOffsetVal -> do
     when (isJust mOffsetVal) $
       fail
@@ -520,13 +523,13 @@ renderPGTLimitClause = \case
             else fail $ "LIMIT value must be non-negative: " <> show n
       PGT_AST.AllSelectLimitValue ->
         fail "LIMIT ALL not supported in this translation."
-      expr -> fail $ "Unsupported LIMIT expression: " <> show expr
+      PGT_AST.ExprSelectLimitValue expr -> renderPGTAExpr cteNames expr
   PGT_AST.FetchOnlyLimitClause{} ->
     fail "FETCH clause is not fully supported yet."
 
 
-renderPGTOffsetClause :: PGT_AST.OffsetClause -> Q Exp
-renderPGTOffsetClause = \case
+renderPGTOffsetClause :: [Text.Text] -> PGT_AST.OffsetClause -> Q Exp
+renderPGTOffsetClause cteNames = \case
   PGT_AST.ExprOffsetClause
     ( PGT_AST.CExprAExpr
         ( PGT_AST.FuncCExpr
@@ -557,17 +560,15 @@ renderPGTOffsetClause = \case
       if n >= 0
         then pure (LitE (IntegerL (fromIntegral n)))
         else fail $ "OFFSET value must be non-negative: " <> show n
-  PGT_AST.ExprOffsetClause expr ->
-    fail $
-      "Unsupported OFFSET expression: " <> show expr
+  PGT_AST.ExprOffsetClause expr -> renderPGTAExpr cteNames expr
   PGT_AST.FetchFirstOffsetClause{} ->
     fail "OFFSET with FETCH FIRST clause is not supported yet."
 
 
 -- Helper to render a single TargetEl for S.values_
 -- Each expression must be aliased.
-renderPGTTargetElForValues :: PGT_AST.TargetEl -> Int -> Q Exp
-renderPGTTargetElForValues targetEl idx = do
+renderPGTTargetElForValues :: [Text.Text] -> PGT_AST.TargetEl -> Int -> Q Exp
+renderPGTTargetElForValues cteNames targetEl idx = do
   (exprAST, mUserAlias) <-
     case targetEl of
       PGT_AST.AliasedExprTargetEl e an -> pure (e, Just an)
@@ -575,7 +576,7 @@ renderPGTTargetElForValues targetEl idx = do
       PGT_AST.ExprTargetEl e -> pure (e, Nothing)
       PGT_AST.AsteriskTargetEl ->
         fail "SELECT * is not supported unless there is a from clause."
-  renderedScalarExp <- renderPGTAExpr exprAST
+  renderedScalarExp <- renderPGTAExpr cteNames exprAST
   let
     aliasLabelStr =
       case mUserAlias of
@@ -585,11 +586,11 @@ renderPGTTargetElForValues targetEl idx = do
 
 
 -- Helper to render a TargetList into an NP list for S.values_
-renderPGTTargetListForValues :: PGT_AST.TargetList -> Q Exp
-renderPGTTargetListForValues (item NE.:| items) = do
+renderPGTTargetListForValues :: [Text.Text] -> PGT_AST.TargetList -> Q Exp
+renderPGTTargetListForValues cteNames (item NE.:| items) = do
   renderedItems <-
     mapM
-      (\(el, idx) -> renderPGTTargetElForValues el idx)
+      (\(el, idx) -> renderPGTTargetElForValues cteNames el idx)
       (zip (item : items) [1 ..])
   -- Construct NP list: e1 :* e2 :* ... :* Nil
   -- Each element in renderedItems is an Exp.
@@ -603,11 +604,11 @@ renderPGTTargetListForValues (item NE.:| items) = do
 
 
 -- New function to render Targeting specifically for S.values_
-renderPGTTargetingForValues :: PGT_AST.Targeting -> Q Exp
-renderPGTTargetingForValues = \case
-  PGT_AST.NormalTargeting targetList -> renderPGTTargetListForValues targetList
+renderPGTTargetingForValues :: [Text.Text] -> PGT_AST.Targeting -> Q Exp
+renderPGTTargetingForValues cteNames = \case
+  PGT_AST.NormalTargeting targetList -> renderPGTTargetListForValues cteNames targetList
   PGT_AST.AllTargeting (Just targetList) ->
-    renderPGTTargetListForValues targetList
+    renderPGTTargetListForValues cteNames targetList
   PGT_AST.AllTargeting Nothing ->
     fail $
       "SELECT * (ALL targeting without a list) is not supported "
@@ -619,28 +620,28 @@ renderPGTTargetingForValues = \case
         <> "this translation."
 
 
-renderPGTOnExpressionsClause :: [PGT_AST.AExpr] -> Q Exp
-renderPGTOnExpressionsClause exprs = do
-    renderedSortExps <- mapM renderToSortExpr exprs
-    pure $ ListE renderedSortExps
-  where
-    renderToSortExpr :: PGT_AST.AExpr -> Q Exp
-    renderToSortExpr astExpr = do
-      squealExpr <- renderPGTAExpr astExpr
-      -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
-      -- are typically specified in the ORDER BY clause.
-      -- Here, we default to ASC for the SortExpression constructor.
-      pure $ ConE 'S.Asc `AppE` squealExpr
+renderPGTOnExpressionsClause :: [Text.Text] -> [PGT_AST.AExpr] -> Q Exp
+renderPGTOnExpressionsClause cteNames exprs = do
+  renderedSortExps <- mapM renderToSortExpr exprs
+  pure $ ListE renderedSortExps
+ where
+  renderToSortExpr :: PGT_AST.AExpr -> Q Exp
+  renderToSortExpr astExpr = do
+    squealExpr <- renderPGTAExpr cteNames astExpr
+    -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
+    -- are typically specified in the ORDER BY clause.
+    -- Here, we default to ASC for the SortExpression constructor.
+    pure $ ConE 'S.Asc `AppE` squealExpr
 
 
-renderPGTSortClause :: PGT_AST.SortClause -> Q Exp
-renderPGTSortClause sortBys = ListE <$> mapM renderPGTSortBy (NE.toList sortBys)
+renderPGTSortClause :: [Text.Text] -> PGT_AST.SortClause -> Q Exp
+renderPGTSortClause cteNames sortBys = ListE <$> mapM (renderPGTSortBy cteNames) (NE.toList sortBys)
 
 
-renderPGTSortBy :: PGT_AST.SortBy -> Q Exp
-renderPGTSortBy = \case
+renderPGTSortBy :: [Text.Text] -> PGT_AST.SortBy -> Q Exp
+renderPGTSortBy cteNames = \case
   PGT_AST.AscDescSortBy aExpr maybeAscDesc maybeNullsOrder -> do
-    squealExpr <- renderPGTAExpr aExpr
+    squealExpr <- renderPGTAExpr cteNames aExpr
     let
       (asc, desc) = case maybeNullsOrder of
         Nothing -> ('S.Asc, 'S.Desc)
@@ -701,7 +702,7 @@ renderPGTJoinedTable cteNames = \case
       PGT_AST.QualJoinMeth maybeJoinType joinQual ->
         case joinQual of
           PGT_AST.OnJoinQual onConditionAExpr -> do
-            onConditionExp <- renderPGTAExpr onConditionAExpr
+            onConditionExp <- renderPGTAExpr cteNames onConditionAExpr
             squealJoinFn <-
               case maybeJoinType of
                 Just (PGT_AST.LeftJoinType _) -> pure $ VarE 'S.leftOuterJoin
@@ -811,25 +812,26 @@ renderPGTRelationExprTableRef cteNames relationExpr maybeAliasClause = do
   Returns (SquealSelectionListExp, Maybe DistinctOnAstExpressions)
 -}
 renderPGTTargeting
-  :: PGT_AST.Targeting
+  :: [Text.Text]
+  -> PGT_AST.Targeting
   -> Q (Exp, Maybe [PGT_AST.AExpr])
-renderPGTTargeting = \case
+renderPGTTargeting cteNames = \case
   PGT_AST.NormalTargeting targetList -> do
-    selListExp <- renderPGTTargetList targetList
+    selListExp <- renderPGTTargetList cteNames targetList
     pure (selListExp, Nothing)
   PGT_AST.AllTargeting maybeTargetList -> do
     selListExp <-
       case maybeTargetList of
         Nothing -> pure $ ConE 'S.Star -- SELECT ALL (which is like SELECT *)
-        Just tl -> renderPGTTargetList tl
+        Just tl -> renderPGTTargetList cteNames tl
     pure (selListExp, Nothing)
   PGT_AST.DistinctTargeting maybeOnExprs targetList -> do
-    selListExp <- renderPGTTargetList targetList
+    selListExp <- renderPGTTargetList cteNames targetList
     pure (selListExp, fmap NE.toList maybeOnExprs)
 
 
-renderPGTTargetEl :: PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
-renderPGTTargetEl targetEl mOuterAlias idx =
+renderPGTTargetEl :: [Text.Text] -> PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
+renderPGTTargetEl cteNames targetEl mOuterAlias idx =
   let
     (exprAST, mInternalAlias) = case targetEl of
       PGT_AST.AliasedExprTargetEl e an -> (e, Just an)
@@ -847,7 +849,7 @@ renderPGTTargetEl targetEl mOuterAlias idx =
     case targetEl of
       PGT_AST.AsteriskTargetEl -> pure $ ConE 'S.Star
       _ -> do
-        renderedScalarExp <- renderPGTAExpr exprAST
+        renderedScalarExp <- renderPGTAExpr cteNames exprAST
         case exprAST of
           PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr _)
             | Nothing <- finalAliasName ->
@@ -864,8 +866,8 @@ renderPGTTargetEl targetEl mOuterAlias idx =
                 `AppE` LabelE aliasLabelStr
 
 
-renderPGTTargetList :: PGT_AST.TargetList -> Q Exp
-renderPGTTargetList (item NE.:| items) = go (item : items) 1
+renderPGTTargetList :: [Text.Text] -> PGT_AST.TargetList -> Q Exp
+renderPGTTargetList cteNames (item NE.:| items) = go (item : items) 1
   where
     isAsterisk :: PGT_AST.TargetEl -> Bool
     isAsterisk PGT_AST.AsteriskTargetEl = True
@@ -915,7 +917,7 @@ renderPGTTargetList (item NE.:| items) = go (item : items) 1
     renderOne el idx
       | isAsterisk el = pure $ ConE 'S.Star
       | isDotStar el = renderPGTTargetElDotStar el
-      | otherwise = renderPGTTargetEl el Nothing idx
+      | otherwise = renderPGTTargetEl cteNames el Nothing idx
 
 
 -- | Defines associativity of an operator.
@@ -1125,16 +1127,16 @@ fixOperatorPrecedence = go
       PGT_AST.ExprListInExpr exprs -> PGT_AST.ExprListInExpr (NE.map go exprs)
 
 
-renderPGTAExpr :: PGT_AST.AExpr -> Q Exp
-renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
-  PGT_AST.CExprAExpr cExpr -> renderPGTCExpr cExpr
+renderPGTAExpr :: [Text.Text] -> PGT_AST.AExpr -> Q Exp
+renderPGTAExpr cteNames astExpr = case fixOperatorPrecedence astExpr of
+  PGT_AST.CExprAExpr cExpr -> renderPGTCExpr cteNames cExpr
   PGT_AST.TypecastAExpr aExpr typename -> do
     tnExp <- renderPGTTypename typename
-    aExp <- renderPGTAExpr aExpr
+    aExp <- renderPGTAExpr cteNames aExpr
     pure $ VarE 'S.cast `AppE` tnExp `AppE` aExp
   PGT_AST.SymbolicBinOpAExpr left op right -> do
-    lExp <- renderPGTAExpr left
-    rExp <- renderPGTAExpr right
+    lExp <- renderPGTAExpr cteNames left
+    rExp <- renderPGTAExpr cteNames right
     squealOpExp <-
       case op of
         PGT_AST.MathSymbolicExprBinOp mathOp -> pure $ renderPGTMathOp mathOp
@@ -1143,23 +1145,23 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
   PGT_AST.PrefixQualOpAExpr op expr -> do
     let
       opExp' = renderPGTQualOp op
-    eExp' <- renderPGTAExpr expr
+    eExp' <- renderPGTAExpr cteNames expr
     pure (opExp' `AppE` eExp')
   PGT_AST.AndAExpr left right -> do
-    lExp' <- renderPGTAExpr left
-    rExp' <- renderPGTAExpr right
+    lExp' <- renderPGTAExpr cteNames left
+    rExp' <- renderPGTAExpr cteNames right
     pure (VarE '(S..&&) `AppE` lExp' `AppE` rExp')
   PGT_AST.OrAExpr left right -> do
-    lExp' <- renderPGTAExpr left
-    rExp' <- renderPGTAExpr right
+    lExp' <- renderPGTAExpr cteNames left
+    rExp' <- renderPGTAExpr cteNames right
     pure (VarE '(S..||) `AppE` lExp' `AppE` rExp')
   PGT_AST.NotAExpr expr -> do
-    eExp' <- renderPGTAExpr expr
+    eExp' <- renderPGTAExpr cteNames expr
     pure (VarE 'S.not_ `AppE` eExp')
   PGT_AST.VerbalExprBinOpAExpr left not op right mEscape -> do
     when (isJust mEscape) $ fail "LIKE with ESCAPE is not supported yet."
-    lExp' <- renderPGTAExpr left
-    rExp' <- renderPGTAExpr right
+    lExp' <- renderPGTAExpr cteNames left
+    rExp' <- renderPGTAExpr cteNames right
     baseOpExp <-
       case op of
         PGT_AST.LikeVerbalExprBinOp -> pure $ VarE 'S.like
@@ -1169,13 +1171,13 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
       finalOpExp = if not then VarE 'S.not_ `AppE` baseOpExp else baseOpExp
     pure (finalOpExp `AppE` lExp' `AppE` rExp')
   PGT_AST.ReversableOpAExpr expr not reversableOp -> do
-    renderedExpr' <- renderPGTAExpr expr
+    renderedExpr' <- renderPGTAExpr cteNames expr
     case reversableOp of
       PGT_AST.NullAExprReversableOp ->
         pure $ (if not then VarE 'S.isNotNull else VarE 'S.isNull) `AppE` renderedExpr'
       PGT_AST.BetweenAExprReversableOp _asymmetric bExpr andAExpr -> do
-        bExp' <- renderPGTBExpr bExpr
-        aExp' <- renderPGTAExpr andAExpr
+        bExp' <- renderPGTBExpr cteNames bExpr
+        aExp' <- renderPGTAExpr cteNames andAExpr
         let
           opVar' = if not then VarE 'S.notBetween else VarE 'S.between
         pure $ opVar' `AppE` renderedExpr' `AppE` TupE [Just bExp', Just aExp']
@@ -1183,7 +1185,7 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
         case inExpr of
           PGT_AST.ExprListInExpr exprList -> do
             let opVar' = if not then VarE 'S.notIn else VarE 'S.in_
-            listExp' <- ListE <$> mapM renderPGTAExpr (NE.toList exprList)
+            listExp' <- ListE <$> mapM (renderPGTAExpr cteNames) (NE.toList exprList)
             pure $ opVar' `AppE` renderedExpr' `AppE` listExp'
           PGT_AST.SelectInExpr selectWithParens -> do
             let
@@ -1191,29 +1193,29 @@ renderPGTAExpr astExpr = case fixOperatorPrecedence astExpr of
                 if not
                   then (VarE '(S../=), VarE 'S.subAll)
                   else (VarE '(S..==), VarE 'S.subAny)
-            subqueryExp <- toSquealSelectWithParens [] Nothing selectWithParens
+            subqueryExp <- toSquealSelectWithParens cteNames Nothing selectWithParens
             pure $ squealFn `AppE` renderedExpr' `AppE` squealOp `AppE` subqueryExp
       _ -> fail $ "Unsupported reversable operator: " <> show reversableOp
   PGT_AST.DefaultAExpr -> pure $ ConE 'S.Default
   PGT_AST.MinusAExpr expr -> do
     -- Unary minus
-    eExp' <- renderPGTAExpr expr
+    eExp' <- renderPGTAExpr cteNames expr
     let
       zeroExp = AppE (VarE 'fromInteger) (LitE (IntegerL 0))
     pure (InfixE (Just zeroExp) (VarE '(-)) (Just eExp'))
   unsupported -> fail $ "Unsupported AExpr: " <> show unsupported
 
 
-renderPGTBExpr :: PGT_AST.BExpr -> Q Exp
-renderPGTBExpr = \case
-  PGT_AST.CExprBExpr cExpr -> renderPGTCExpr cExpr
+renderPGTBExpr :: [Text.Text] -> PGT_AST.BExpr -> Q Exp
+renderPGTBExpr cteNames = \case
+  PGT_AST.CExprBExpr cExpr -> renderPGTCExpr cteNames cExpr
   PGT_AST.TypecastBExpr bExpr typename -> do
     tnExp <- renderPGTTypename typename
-    bExp <- renderPGTBExpr bExpr
+    bExp <- renderPGTBExpr cteNames bExpr
     pure $ VarE 'S.cast `AppE` tnExp `AppE` bExp
   PGT_AST.SymbolicBinOpBExpr left op right -> do
-    lExp <- renderPGTBExpr left
-    rExp <- renderPGTBExpr right
+    lExp <- renderPGTBExpr cteNames left
+    rExp <- renderPGTBExpr cteNames right
     squealOpExp <-
       case op of
         PGT_AST.MathSymbolicExprBinOp mathOp -> pure $ renderPGTMathOp mathOp
@@ -1222,8 +1224,8 @@ renderPGTBExpr = \case
   unsupported -> fail $ "Unsupported BExpr: " <> show unsupported
 
 
-renderPGTCExpr :: PGT_AST.CExpr -> Q Exp
-renderPGTCExpr = \case
+renderPGTCExpr :: [Text.Text] -> PGT_AST.CExpr -> Q Exp
+renderPGTCExpr cteNames = \case
   PGT_AST.AexprConstCExpr aexprConst -> pure $ renderPGTAexprConst aexprConst
   PGT_AST.ColumnrefCExpr columnref -> pure $ renderPGTColumnref columnref
   PGT_AST.ParamCExpr n maybeIndirection -> do
@@ -1233,23 +1235,23 @@ renderPGTCExpr = \case
   PGT_AST.InParensCExpr expr maybeIndirection -> do
     when (isJust maybeIndirection) $
       fail "Parenthesized expressions with indirection are not supported."
-    renderPGTAExpr expr -- Squeal's operator precedence should handle this
-  PGT_AST.FuncCExpr funcExpr -> renderPGTFuncExpr funcExpr
+    renderPGTAExpr cteNames expr -- Squeal's operator precedence should handle this
+  PGT_AST.FuncCExpr funcExpr -> renderPGTFuncExpr cteNames funcExpr
   unsupported -> fail $ "Unsupported CExpr: " <> show unsupported
 
 
-renderPGTFuncExpr :: PGT_AST.FuncExpr -> Q Exp
-renderPGTFuncExpr = \case
+renderPGTFuncExpr :: [Text.Text] -> PGT_AST.FuncExpr -> Q Exp
+renderPGTFuncExpr cteNames = \case
   PGT_AST.ApplicationFuncExpr funcApp maybeWithinGroup maybeFilter maybeOver -> do
     when (isJust maybeWithinGroup) $ fail "WITHIN GROUP clause is not supported."
     when (isJust maybeFilter) $ fail "FILTER clause is not supported."
     when (isJust maybeOver) $ fail "OVER clause is not supported."
-    renderPGTFuncApplication funcApp
-  PGT_AST.SubexprFuncExpr funcCommonSubexpr -> renderPGTFuncExprCommonSubexpr funcCommonSubexpr
+    renderPGTFuncApplication cteNames funcApp
+  PGT_AST.SubexprFuncExpr funcCommonSubexpr -> renderPGTFuncExprCommonSubexpr cteNames funcCommonSubexpr
 
 
-renderPGTFuncApplication :: PGT_AST.FuncApplication -> Q Exp
-renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
+renderPGTFuncApplication :: [Text.Text] -> PGT_AST.FuncApplication -> Q Exp
+renderPGTFuncApplication cteNames (PGT_AST.FuncApplication funcName maybeParams) =
   case funcName of
     PGT_AST.IndirectedFuncName{} ->
       fail "Functions with indirection (e.g. schema.func) are not supported."
@@ -1307,7 +1309,7 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
                     when (isJust maybeSortClause) $
                       fail "ORDER BY in function calls is not supported."
                     fn <- squealFn
-                    argExps <- mapM renderPGTFuncArgExpr (NE.toList args)
+                    argExps <- mapM (renderPGTFuncArgExpr cteNames) (NE.toList args)
                     pure $ foldl' AppE fn argExps
                   PGT_AST.StarFuncApplicationParams ->
                     -- Specific for count(*)
@@ -1317,21 +1319,21 @@ renderPGTFuncApplication (PGT_AST.FuncApplication funcName maybeParams) =
                   _ -> fail $ "Unsupported function parameters structure: " <> show params
 
 
-renderPGTFuncArgExpr :: PGT_AST.FuncArgExpr -> Q Exp
-renderPGTFuncArgExpr = \case
-  PGT_AST.ExprFuncArgExpr aExpr -> renderPGTAExpr aExpr
+renderPGTFuncArgExpr :: [Text.Text] -> PGT_AST.FuncArgExpr -> Q Exp
+renderPGTFuncArgExpr cteNames = \case
+  PGT_AST.ExprFuncArgExpr aExpr -> renderPGTAExpr cteNames aExpr
   _ -> fail "Named or colon-syntax function arguments not supported"
 
 
-renderPGTFuncExprCommonSubexpr :: PGT_AST.FuncExprCommonSubexpr -> Q Exp
-renderPGTFuncExprCommonSubexpr = \case
+renderPGTFuncExprCommonSubexpr :: [Text.Text] -> PGT_AST.FuncExprCommonSubexpr -> Q Exp
+renderPGTFuncExprCommonSubexpr cteNames = \case
   PGT_AST.CurrentTimestampFuncExprCommonSubexpr (Just _) ->
     fail "CURRENT_TIMESTAMP with precision is not supported."
   PGT_AST.CurrentTimestampFuncExprCommonSubexpr Nothing -> pure $ VarE 'S.now -- Or S.currentTimestamp
   PGT_AST.CurrentDateFuncExprCommonSubexpr -> pure $ VarE 'S.currentDate
   PGT_AST.CoalesceFuncExprCommonSubexpr exprListNE -> do
-    renderedInitExprs <- mapM renderPGTAExpr (NE.init exprListNE)
-    renderedLastExpr <- renderPGTAExpr (NE.last exprListNE)
+    renderedInitExprs <- mapM (renderPGTAExpr cteNames) (NE.init exprListNE)
+    renderedLastExpr <- renderPGTAExpr cteNames (NE.last exprListNE)
     pure $ VarE 'S.coalesce `AppE` ListE renderedInitExprs `AppE` renderedLastExpr
   e -> fail $ "Unsupported common function subexpression: " <> show e
 
