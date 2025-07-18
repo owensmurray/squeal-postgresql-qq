@@ -16,7 +16,7 @@ module Squeal.QuasiQuotes.Common (
 
 import Control.Applicative (Alternative((<|>)))
 import Control.Monad (when)
-import Data.Foldable (Foldable(elem, foldl', null))
+import Data.Foldable (Foldable(elem, foldl'))
 import Data.Maybe (isJust)
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
@@ -28,7 +28,7 @@ import Prelude
   , Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
   , Num((*), (+), (-), fromInteger), Ord((<)), Semigroup((<>)), Show(show)
   , Traversable(mapM), ($), (&&), (.), (<$>), (||), Int, Integer, any, either
-  , error, fromIntegral, id
+  , error, fromIntegral, id, otherwise
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
@@ -916,16 +916,7 @@ renderPGTTargetEl targetEl mOuterAlias idx =
 
 
 renderPGTTargetList :: PGT_AST.TargetList -> Q Exp
-renderPGTTargetList (item NE.:| items) =
-    if null items && isAsterisk item
-      then
-        pure $ ConE 'S.Star
-      else
-        if null items && isDotStar item
-          then
-            renderPGTTargetElDotStar item
-          else
-            go (item : items) 1
+renderPGTTargetList (item NE.:| items) = go (item : items) 1
   where
     isAsterisk :: PGT_AST.TargetEl -> Bool
     isAsterisk PGT_AST.AsteriskTargetEl = True
@@ -952,35 +943,29 @@ renderPGTTargetList (item NE.:| items) =
               ( PGT_AST.ColumnrefCExpr
                   ( PGT_AST.Columnref
                       qualName
-                      indirectionOpt
+                      _ -- indirectionOpt
                     )
                 )
             )
         ) =
-        case indirectionOpt of
-          Just indirection
-            | any isAllIndirectionEl (NE.toList indirection) ->
-                pure $
-                  ConE 'S.DotStar
-                    `AppE` (LabelE (Text.unpack (getIdentText qualName)))
-          _ ->
-            fail $
-              "renderPGTTargetElDotStar called with non-DotStar "
-                <> "TargetEl structure"
+        pure $
+          ConE 'S.DotStar
+            `AppE` (LabelE (Text.unpack (getIdentText qualName)))
     renderPGTTargetElDotStar _ =
       fail "renderPGTTargetElDotStar called with unexpected TargetEl"
 
     go :: [PGT_AST.TargetEl] -> Int -> Q Exp
-    go [] _ =
-      {- Should not happen with NonEmpty input to renderPGTTargetList -}
-      fail "Empty selection list items in go."
-    go [el] currentIdx = renderPGTTargetEl el Nothing currentIdx
+    go [] _ = fail "Empty selection list items in go."
+    go [el] currentIdx = renderOne el currentIdx
     go (el : more) currentIdx = do
-      renderedEl <- renderPGTTargetEl el Nothing currentIdx
-      if null more
-        then pure renderedEl
-        else do
-          restRendered <- go more (currentIdx + 1)
-          pure $ ConE 'S.Also `AppE` restRendered `AppE` renderedEl
+      renderedEl <- renderOne el currentIdx
+      restRendered <- go more (currentIdx + 1)
+      pure $ ConE 'S.Also `AppE` restRendered `AppE` renderedEl
+
+    renderOne :: PGT_AST.TargetEl -> Int -> Q Exp
+    renderOne el idx
+      | isAsterisk el = pure $ ConE 'S.Star
+      | isDotStar el = renderPGTTargetElDotStar el
+      | otherwise = renderPGTTargetEl el Nothing idx
 
 
