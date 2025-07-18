@@ -821,7 +821,7 @@ main =
                      )
               statement =
                 [ssql|
-                insert into
+                  insert into
                   emails (id, user_id, email)
                   values (1, 'user-1', 'foo@bar')
                 returning *
