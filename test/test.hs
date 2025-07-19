@@ -1337,8 +1337,8 @@ main =
                        )
                      )
                    )
-            mkStatement someName =
-              [ssql| select * from users where name = inline("someName") |]
+            mkStatement haskellVariable =
+              [ssql| select * from users where name = inline("haskellVariable") |]
 
             squealRendering1 :: Text
             squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
