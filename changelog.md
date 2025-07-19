@@ -1,3 +1,7 @@
+### 0.1.1.1
+
+No feature or behavior changes. Only documentation.
+
 ### 0.1.1.0
 
 * Support common table expressions (CTEs).
