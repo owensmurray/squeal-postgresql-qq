@@ -1337,8 +1337,8 @@ main =
                        )
                      )
                    )
-            mkStatement someName =
-              [ssql| select * from users where name = inline("someName") |]
+            mkStatement haskellVariable =
+              [ssql| select * from users where name = inline("haskellVariable") |]
 
             squealRendering1 :: Text
             squealRendering1 = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'Alice' :: text))"
@@ -1373,6 +1373,21 @@ main =
           squealRendering :: Text
           squealRendering =
             "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"name\" IN ((E'Alice' :: text), (E'Bob' :: text))"
+        checkStatement squealRendering stmt
+
+      it "select * from users where users.id in (select emails.user_id from emails)" $ do
+        let
+          stmt
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
+                 )
+          stmt = [ssql| select * from users where users.id in (select emails.user_id from emails) |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
         checkStatement squealRendering stmt
 
       it "select * from users where users.name not in ('Alice', 'Bob')" $ do

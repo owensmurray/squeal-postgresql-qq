@@ -1,6 +1,6 @@
 cabal-version:       3.0
 name:                squeal-postgresql-qq
-version:             0.1.1.0
+version:             0.1.1.1
 synopsis:            QuasiQuoter transforming raw sql into Squeal expressions.
 -- description:         
 homepage:            https://github.com/owensmurray/squeal-postgresql-qq
@@ -14,6 +14,7 @@ build-type:          Simple
 extra-source-files:
   README.md
   LICENSE
+  changelog.md
 
 common dependencies
   build-depends:
