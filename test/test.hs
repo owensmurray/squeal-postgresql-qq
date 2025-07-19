@@ -1375,6 +1375,21 @@ main =
             "SELECT * FROM \"users\" AS \"users\" WHERE \"users\".\"name\" IN ((E'Alice' :: text), (E'Bob' :: text))"
         checkStatement squealRendering stmt
 
+      it "select * from users where users.id in (select emails.user_id from emails)" $ do
+        let
+          stmt
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
+                 )
+          stmt = [ssql| select * from users where users.id in (select emails.user_id from emails) |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
+        checkStatement squealRendering stmt
+
       it "select * from users where users.name not in ('Alice', 'Bob')" $ do
         let
           stmt
