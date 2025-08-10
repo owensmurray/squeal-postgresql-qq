@@ -144,7 +144,7 @@ instance
         (,)
         (fromLabel @fld)
         (getRowDecoder @moreRow @moreFields)
-instance () => HasRowDecoder '[] () where
+instance HasRowDecoder '[] () where
   getRowDecoder = pure ()
 
 
