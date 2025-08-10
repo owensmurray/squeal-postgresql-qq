@@ -1439,7 +1439,8 @@ main =
                  ( Field "id" Text
                  , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
                  )
-          stmt = [ssql| select * from users where users.id in (select emails.user_id from emails) |]
+          stmt =
+            [ssql| select * from users where users.id in (select emails.user_id from emails) |]
           squealRendering :: Text
           squealRendering =
             "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
