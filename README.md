@@ -48,9 +48,6 @@ See the haddocks.
 
 ## Most important features not currently implemented
 
-* Prepared statement parameters
-    * See the haddock documentation for how to get haskell values into
-      your sql statements.
 * `ON CONFLICT` clause for `INSERT` statements.
 
 ## Other features not currently implemented
@@ -125,6 +122,7 @@ queries
   select * from public.users [✔]
   SELECT * FROM "users" AS "users" [✔]
   select * from users where name = 'bob' [✔]
+  select * from users where id = $1 [✔]
   select users.name from users [✔]
   select name from users [✔]
   select count(*) from users group by () [✔]
@@ -155,6 +153,7 @@ inserts
   insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') [✔]
   insert into emails (id, user_id, email) values (1, 'user-1', $1) [✔]
   insert into emails (id, user_id, email) values (1, $2, $1) [✔]
+  insert into users_copy (id, name, bio) values ($1, $2, $3) [✔]
   insert into emails (id, user_id, email) values (inline(i), inline(uid), inline_param(e)) [✔]
   default keyword
     insert into emails (id, user_id, email) values (default, 'foo', 'bar') [✔]
@@ -176,6 +175,7 @@ inserts
 deletes
   delete from users where true [✔]
   delete from emails where id = 1 [✔]
+  delete from emails where id = $1 [✔]
   delete from emails where email = inline(e) [✔]
   delete from users where id = 'some-id' returning id [✔]
   with common table expressions
@@ -185,6 +185,7 @@ updates
   update users set name = 'new name' where id = 'some-id' [✔]
   update users set name = 'new name', bio = 'new bio' where id = 'some-id' [✔]
   update users set name = inline(n) where id = 'some-id' [✔]
+  update users set name = $1 where id = $2 [✔]
   update users set name = 'new name' where id = 'some-id' returning id [✔]
   with common table expressions
     with to_update as (select id from users where name = 'Alice') update users set name = 'Alicia' from to_update where users.id = to_update.id [✔]
@@ -217,6 +218,7 @@ scalar expressions
     haskell variables in expressions [✔]
   select (emails.id + 1) * 2 as calc from emails [✔]
   select * from users where users.name in ('Alice', 'Bob') [✔]
+  select * from users where users.id in (select emails.user_id from emails) [✔]
   select * from users where users.name not in ('Alice', 'Bob') [✔]
   select * from emails where emails.id between 0 and 10 [✔]
   select * from emails where emails.id not between 0 and 10 [✔]

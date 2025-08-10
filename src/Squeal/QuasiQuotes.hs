@@ -40,7 +40,17 @@ import qualified PostgresqlSyntax.Parsing as PGT_Parse
 {- |
   Splice in a squeal expression with the following type:
 
-  > Statement db () <Canonical-Haskell-Row-Type>
+  > Statement db params <Concrete-Haskell-Row-Type>
+
+  = Input parameters
+
+  The input parameters @params@ is a polymorphic type that gets encoded into
+  SQL statement parameters. It is a direct pass-through to Squeal using Squeal's
+  `Squeal.PostgreSQL.genericParams`. The upshot is that we don't monomorphize
+  this type the same way we do for the statement's resulting row type. See the
+  [Polymorphic Params Discussion](#polymorphic-params) for the reason why not.
+
+  = Resulting Row Type
 
   @\<Canonical-Haskell-Row-Type\>@ is going to be some concrete tuple of the
   form:
@@ -60,10 +70,15 @@ import qualified PostgresqlSyntax.Parsing as PGT_Parse
 
   = Haskell values
 
-  The way you get Haskell values into your sql statements is with special bulit-in sql functions:
+  The way you get Haskell values into your sql statements is with special
+  bulit-in sql functions:
 
-  * @inline(\<ident\>)@: Corresponds to 'Squeal.PostgreSQL.Expression.Inline.inline' (value being inlined must not be null)
-  * @inline_param(\<ident\>)@: Corresponds to 'Squeal.PostgreSQL.Expression.Inline.inlineParam' (value can be null)
+  * @inline(\<ident\>)@: Corresponds to
+    'Squeal.PostgreSQL.Expression.Inline.inline' (value being inlined must
+    not be null)
+
+  * @inline_param(\<ident\>)@: Corresponds to
+    'Squeal.PostgreSQL.Expression.Inline.inlineParam' (value can be null)
 
   where @\<ident\>@ is a haskell identifier in scope, whose type has an
   'Squeal.PostgreSQL.Inline' instance.
@@ -180,6 +195,10 @@ toSquealStatement = \case
 
   #discussion#
 
+  #monomorphized-output-rows#
+
+  == Monomorphized Output Rows
+
   The reason we monomorphize the SQL statement using the nested tuple
   structure (see 'ssql') is that Squeal by default allows for generic
   based polymorphic input row types and output row types. This is
@@ -210,6 +229,66 @@ toSquealStatement = \case
   failing to align with your expected types, you can put your expected
   row type in a type signature and get a much better error message about
   how and why the SQL statement is failing to type check.
+
+  #polymorphic-params#
+
+  == Polymorphic Input Parameters
+
+  Type inferencing of statement parameters is not supported, unlike the
+  type inferencing of statement output row types. That is to say you
+  can write this (i.e. a type hole in the /output/ slot) and expect to
+  get a concrete type in your GHC error message.
+
+  > statement :: Statement DB (Only Text) _ 
+  > statement [ssql| select name from users where id = $1 |]
+
+  But GHC will not give you anything useful if you type this instead (i.e. a
+  type hole in the /input/ slot):
+
+  > statement :: Statement DB _ (Field "name" Text, ())
+  > statement [ssql| select name from users where id = $1 |]
+
+  The TLDR is that it can't easily be made to work without some pretty
+  extensive machinery to cope with SQL's type system and even then it
+  would come with some unpalatable trade-offs.
+
+  The basic problem is that SQL comparisons and other operators support
+  null polymorphic values as their parameters. So for instance, an SQL
+  statement can compare a non-null column with the literal value @null@,
+  and that is valid SQL.  So if you compare the non-null column with a
+  parameter instead, what should the type of the parameter be?
+
+
+  E.g.: 
+
+  > select * from users where id = null -- compare with `null`.
+  > select * from users where id = $1   -- compare with a param.
+  > select * from users where id = id   -- compare with non-nullable column.
+
+  Should the parameter be nullable or not nullable? It can be
+  either! Therefore the corresponding Haskell type can be either! How do we choose?
+
+  We could say, by fiat, that input params always nullable (and make the
+  user type a bunch of 'Just's everywhere), but then consider this insert
+  statement where the parameter is being used to specify the value of
+  a non-null column.
+
+  > insert into users (id) values ($1)
+
+  This instance of the parameter can't be nullable.  It must be
+  non-nullable.
+
+  So sometimes statement parameters can be null polymorphic and sometimes
+  they can't. Sometimes a Haskell type of /either/ @Something@ /or/
+  @(Maybe Something)@ will work, and sometimes it won't.
+
+  I think the decision requires semantic knowledge of a non-trivial
+  subset of SQL. A design goal of this library is specifically to offload
+  semantic knowledge of SQL to Squeal, not to re-implement it. So unless
+  I can think of (or someone contributes) a really clever trick, I think
+  input params are going to stay polymorphic, with all the inscrutable
+  Squeal and @Generics.SOP@ type errors you get when your types don't
+  quite align.
 -}
 
 
