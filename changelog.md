@@ -1,3 +1,21 @@
+### 0.1.2.0
+
+* New features
+  * Officially support statement parameters
+
+    They where technically working prior to this version, but now that I realize
+    they can't be made monomorphic I have decided to support them officially in
+    their polymorphic form. See the Haddocks for more information.
+
+    I am electing to escalate this to a minor version bump when I think it
+    could technically be a patch version (from the standpoint of "whether it
+    compiles") to reflect the "officially supported" nature of the feature.
+
+* No-Op improvements
+  * Expand and improve the documentation
+  * Some internal refactors
+
+
 ### 0.1.1.1
 
 No feature or behavior changes. Only documentation.
