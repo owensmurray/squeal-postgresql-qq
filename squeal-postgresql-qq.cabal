@@ -1,6 +1,6 @@
 cabal-version:       3.0
 name:                squeal-postgresql-qq
-version:             0.1.1.1
+version:             0.1.2.0
 synopsis:            QuasiQuoter transforming raw sql into Squeal expressions.
 -- description:         
 homepage:            https://github.com/owensmurray/squeal-postgresql-qq
@@ -44,8 +44,8 @@ library
   other-modules:
     Squeal.QuasiQuotes.Delete
     Squeal.QuasiQuotes.Insert
+    Squeal.QuasiQuotes.MonoRow
     Squeal.QuasiQuotes.Query
-    Squeal.QuasiQuotes.RowType
     Squeal.QuasiQuotes.Update
   hs-source-dirs:      src
   default-language:    Haskell2010

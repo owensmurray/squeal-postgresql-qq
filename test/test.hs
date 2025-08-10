@@ -169,6 +169,26 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'bob' :: text))"
         checkStatement squealRendering statement
 
+      it "select * from users where id = $1" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Only Text)
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select * from users where id = $1 |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE (\"id\" = ($1 :: text))"
+        checkStatement squealRendering statement
+
       it "select users.name from users" $ do
         let
           statement :: Statement DB () (Field "name" Text, ())
@@ -669,6 +689,24 @@ main =
             "INSERT INTO \"emails\" AS \"emails\" (\"id\", \"user_id\", \"email\") VALUES (1, ($2 :: text), ($1 :: text))"
         checkStatement squealRendering statement
 
+      it "insert into users_copy (id, name, bio) values ($1, $2, $3)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 (Text, Text, Maybe Text)
+                 ()
+          statement =
+            [ssql|
+              insert into
+                users_copy (id, name, bio)
+                values ($1, $2, $3)
+            |]
+          squealRendering :: Text
+          squealRendering =
+            "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES (($1 :: text), ($2 :: text), ($3 :: text))"
+        checkStatement squealRendering statement
+
       it
         "insert into emails (id, user_id, email) values (inline(i), inline(uid), inline_param(e))"
         $ do
@@ -922,6 +960,14 @@ main =
             "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = 1)"
         checkStatement squealRendering statement
 
+      it "delete from emails where id = $1" $ do
+        let
+          statement :: Statement DB (Only Int32) ()
+          statement = [ssql| delete from emails where id = $1 |]
+          squealRendering :: Text
+          squealRendering = "DELETE FROM \"emails\" AS \"emails\" WHERE (\"id\" = ($1 :: int4))"
+        checkStatement squealRendering statement
+
       it "delete from emails where email = inline(e)" $ do
         let
           statement :: Statement DB () ()
@@ -1005,6 +1051,15 @@ main =
           squealRendering :: Text
           squealRendering =
             "UPDATE \"users\" AS \"users\" SET \"name\" = (E'new name' :: text) WHERE (\"id\" = (E'some-id' :: text))"
+        checkStatement squealRendering statement
+
+      it "update users set name = $1 where id = $2" $ do
+        let
+          statement :: Statement DB (Text, Text) ()
+          statement = [ssql| update users set name = $1 where id = $2 |]
+          squealRendering :: Text
+          squealRendering =
+            "UPDATE \"users\" AS \"users\" SET \"name\" = ($1 :: text) WHERE (\"id\" = ($2 :: text))"
         checkStatement squealRendering statement
 
       it "update users set name = 'new name' where id = 'some-id' returning id" $ do
@@ -1384,7 +1439,8 @@ main =
                  ( Field "id" Text
                  , (Field "name" Text, (Field "employee_id" UUID, (Field "bio" (Maybe Text), ())))
                  )
-          stmt = [ssql| select * from users where users.id in (select emails.user_id from emails) |]
+          stmt =
+            [ssql| select * from users where users.id in (select emails.user_id from emails) |]
           squealRendering :: Text
           squealRendering =
             "SELECT * FROM \"users\" AS \"users\" WHERE (\"users\".\"id\" = ANY (SELECT \"emails\".\"user_id\" AS \"user_id\" FROM \"emails\" AS \"emails\"))"
