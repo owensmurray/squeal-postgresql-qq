@@ -68,10 +68,10 @@ import qualified PostgresqlSyntax.Parsing as PGT_Parse
   See the [discussion](#discussion) section for why we monomorphize the
   squeal 'Statement' in this way.
 
-  = Haskell values
+  = Inline Haskell Values
 
-  The way you get Haskell values into your sql statements is with special
-  bulit-in sql functions:
+  If you don't want to use statement parameters, you can still get Haskell
+  values into your statements is with special bulit-in sql functions:
 
   * @inline(\<ident\>)@: Corresponds to
     'Squeal.PostgreSQL.Expression.Inline.inline' (value being inlined must
@@ -83,7 +83,7 @@ import qualified PostgresqlSyntax.Parsing as PGT_Parse
   where @\<ident\>@ is a haskell identifier in scope, whose type has an
   'Squeal.PostgreSQL.Inline' instance.
 
-  = Example
+  = Examples
 
   For the examples, let's assume you have a database like this:
 

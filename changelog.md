@@ -1,3 +1,8 @@
+### 0.1.2.1
+
+* No-op improvements
+  * Minor documentation edits.
+
 ### 0.1.2.0
 
 * New features
