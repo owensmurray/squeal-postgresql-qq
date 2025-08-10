@@ -27,10 +27,10 @@ import Prelude
   )
 import Squeal.QuasiQuotes.Delete (toSquealDelete)
 import Squeal.QuasiQuotes.Insert (toSquealInsert)
-import Squeal.QuasiQuotes.Query (toSquealQuery)
-import Squeal.QuasiQuotes.RowType
+import Squeal.QuasiQuotes.MonoRow
   ( Field(Field, unField), monoManipulation, monoQuery
   )
+import Squeal.QuasiQuotes.Query (toSquealQuery)
 import Squeal.QuasiQuotes.Update (toSquealUpdate)
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST

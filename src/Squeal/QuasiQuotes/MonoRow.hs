@@ -22,8 +22,8 @@
   navigating them is only likely to increase when a lot of the squeal
   "code" itself is hidden behind a quasiquoter.
 -}
-module Squeal.QuasiQuotes.RowType (
-  RowType,
+module Squeal.QuasiQuotes.MonoRow (
+  MonoRow,
   monoQuery,
   monoManipulation,
   Field (..),
@@ -48,7 +48,7 @@ import qualified Squeal.PostgreSQL as Squeal
 
 
 {- FOURMOLU_DISABLE -}
-type family RowType a = b | b -> a where
+type family MonoRow a = b | b -> a where
   {-
     It would be more convenient to use a helper type family here that
     would map PGtypes to Haskell types. But if we did that, we would
@@ -68,26 +68,26 @@ type family RowType a = b | b -> a where
       Helper Int32 = Maybe Bool
       Helper Bool = Bool
   -}
-  RowType (fld ::: 'NotNull PGbool ': more) = (Field fld Bool, RowType more)
-  RowType (fld ::: 'NotNull PGint4 ': more) = (Field fld Int32, RowType more)
-  RowType (fld ::: 'NotNull PGint8 ': more) = (Field fld Int64, RowType more)
-  RowType (fld ::: 'NotNull PGtext ': more) = (Field fld Text, RowType more)
-  RowType (fld ::: 'NotNull PGuuid ': more) = (Field fld UUID, RowType more)
-  RowType (fld ::: 'NotNull PGdate ': more) = (Field fld Day, RowType more)
-  RowType (fld ::: 'NotNull PGtimestamptz ': more) = (Field fld UTCTime, RowType more)
-  RowType (fld ::: 'NotNull PGjsonb ': more) = (Field fld (Jsonb Value), RowType more)
-  RowType (fld ::: 'NotNull PGjson ': more) = (Field fld (Json Value), RowType more)
+  MonoRow (fld ::: 'NotNull PGbool ': more) = (Field fld Bool, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGint4 ': more) = (Field fld Int32, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGint8 ': more) = (Field fld Int64, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGtext ': more) = (Field fld Text, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGuuid ': more) = (Field fld UUID, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGdate ': more) = (Field fld Day, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGtimestamptz ': more) = (Field fld UTCTime, MonoRow more)
+  MonoRow (fld ::: 'NotNull PGjsonb ': more) = (Field fld (Jsonb Value), MonoRow more)
+  MonoRow (fld ::: 'NotNull PGjson ': more) = (Field fld (Json Value), MonoRow more)
 
-  RowType (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), RowType more)
-  RowType (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), RowType more)
-  RowType (fld ::: 'Null PGint8 ': more) = (Field fld (Maybe Int64), RowType more)
-  RowType (fld ::: 'Null PGtext ': more) = (Field fld (Maybe Text), RowType more)
-  RowType (fld ::: 'Null PGuuid ': more) = (Field fld (Maybe UUID), RowType more)
-  RowType (fld ::: 'Null PGdate ': more) = (Field fld (Maybe Day), RowType more)
-  RowType (fld ::: 'Null PGtimestamptz ': more) = (Field fld (Maybe UTCTime), RowType more)
-  RowType (fld ::: 'Null PGjsonb ': more) = (Field fld (Maybe (Jsonb Value)), RowType more)
-  RowType (fld ::: 'Null PGjson ': more) = (Field fld (Maybe (Json Value)), RowType more)
-  RowType '[] = ()
+  MonoRow (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), MonoRow more)
+  MonoRow (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), MonoRow more)
+  MonoRow (fld ::: 'Null PGint8 ': more) = (Field fld (Maybe Int64), MonoRow more)
+  MonoRow (fld ::: 'Null PGtext ': more) = (Field fld (Maybe Text), MonoRow more)
+  MonoRow (fld ::: 'Null PGuuid ': more) = (Field fld (Maybe UUID), MonoRow more)
+  MonoRow (fld ::: 'Null PGdate ': more) = (Field fld (Maybe Day), MonoRow more)
+  MonoRow (fld ::: 'Null PGtimestamptz ': more) = (Field fld (Maybe UTCTime), MonoRow more)
+  MonoRow (fld ::: 'Null PGjsonb ': more) = (Field fld (Maybe (Jsonb Value)), MonoRow more)
+  MonoRow (fld ::: 'Null PGjson ': more) = (Field fld (Maybe (Json Value)), MonoRow more)
+  MonoRow '[] = ()
 {- FOURMOLU_ENABLE -}
 
 
@@ -103,30 +103,30 @@ instance
 
 
 {- |
-  Like 'Squeal.query', but use the monomorphizing 'RowType' family to
+  Like 'Squeal.query', but use the monomorphizing 'MonoRow' family to
   fully specify the output rows. This is mainly a convenience to the
   template haskell code so it can simply quote this function instead of
   having to basically inline it directly in TH.
 -}
 monoQuery
   :: forall db params input row ignored.
-     ( HasRowDecoder row (RowType row)
+     ( HasRowDecoder row (MonoRow row)
      , SListI row
      , Squeal.GenericParams db params input ignored
      )
   => Squeal.Query '[] '[] db params row
-  -> Squeal.Statement db input (RowType row)
+  -> Squeal.Statement db input (MonoRow row)
 monoQuery = Squeal.Query Squeal.genericParams getRowDecoder
 
 
 monoManipulation
   :: forall db params input row ignored.
-     ( HasRowDecoder row (RowType row)
+     ( HasRowDecoder row (MonoRow row)
      , SListI row
      , Squeal.GenericParams db params input ignored
      )
   => Squeal.Manipulation '[] db params row
-  -> Squeal.Statement db input (RowType row)
+  -> Squeal.Statement db input (MonoRow row)
 monoManipulation = Squeal.Manipulation Squeal.genericParams getRowDecoder
 
 
