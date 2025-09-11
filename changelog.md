@@ -1,3 +1,13 @@
+### 0.1.3.0
+
+* New features
+  * Support `ON CONFLICT ON CONSTRAINT` in `INSERT` statements.
+    * `insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing` [✔]
+    * `insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name'` [✔]
+    * `insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do update set name = 'new_name' where users_copy.name = 'old_name'` [✔]
+    * `insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing returning id` [✔]
+    * `insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name' returning *` [✔]
+
 ### 0.1.2.1
 
 * No-op improvements
