@@ -605,6 +605,52 @@ main =
           checkStatement squealRendering statement
 
         it
+          "with recursive t as ( select 1 as n union all select (n + 1) as n from t where n < 100) select n from t"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     (Field "n" Int64, ())
+              statement =
+                [ssql|
+                with recursive t as (
+                  select 1 as n
+                  union all
+                  select (n + 1) as n from t where n < 100
+                )
+                select n from t
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH RECURSIVE \"t\" AS ((SELECT * FROM (VALUES (1)) AS t (\"n\")) UNION ALL (SELECT (\"n\" + 1) AS \"n\" FROM \"t\" AS \"t\" WHERE (\"n\" < 100))) SELECT \"n\" AS \"n\" FROM \"t\" AS \"t\""
+            checkStatement squealRendering statement
+
+        it
+          "with recursive users_cte as ( select id, name from users union all select id, name from users_cte) select * from users_cte"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     (Field "id" Text, (Field "name" Text, ()))
+              statement =
+                [ssql|
+                with recursive users_cte as (
+                  select id, name from users
+                  union all
+                  select id, name from users_cte
+                )
+                select * from users_cte
+              |]
+              squealRendering :: Text
+              squealRendering =
+                "WITH RECURSIVE \"users_cte\" AS ((SELECT \"id\" AS \"id\", \"name\" AS \"name\" FROM \"users\" AS \"users\") UNION ALL (SELECT \"id\" AS \"id\", \"name\" AS \"name\" FROM \"users_cte\" AS \"users_cte\")) SELECT * FROM \"users_cte\" AS \"users_cte\""
+            checkStatement squealRendering statement
+
+        it
           "with users_cte as (select * from users), emails_cte as (select * from emails) select users_cte.*, emails_cte.email from users_cte join emails_cte on users_cte.id = emails_cte.user_id"
           $ do
             let
