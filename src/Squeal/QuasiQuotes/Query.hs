@@ -16,10 +16,13 @@ module Squeal.QuasiQuotes.Query (
   getIdentText,
 ) where
 
-import Control.Applicative (Alternative((<|>)))
-import Control.Monad (unless, when)
-import Data.Foldable (Foldable(elem, foldl'), foldlM)
+import Control.Monad (unless, when, zipWithM)
+import Data.Either (partitionEithers)
+import Data.Foldable (foldlM)
+import Data.Function (on)
+import Data.List (groupBy, partition, sortBy)
 import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Ord (comparing)
 import Data.String (IsString(fromString))
 import Language.Haskell.TH.Syntax
   ( Exp(AppE, AppTypeE, ConE, InfixE, LabelE, ListE, LitE, TupE, VarE)
@@ -27,16 +30,60 @@ import Language.Haskell.TH.Syntax
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(foldr, length, null), Functor(fmap), Maybe(Just, Nothing)
-  , MonadFail(fail), Num((*), (+), (-), fromInteger), Ord((<), (>=))
-  , Semigroup((<>)), Show(show), Traversable(mapM), ($), (&&), (.), (<$>), (||)
-  , Int, Integer, any, either, error, fromIntegral, id, otherwise, zip
+  , Foldable(elem, foldl', foldr, length, null), Functor(fmap)
+  , Maybe(Just, Nothing), MonadFail(fail), Num((*), (+), (-), fromInteger)
+  , Ord((<), (>=), compare), Semigroup((<>)), Show(show), Traversable(mapM), ($)
+  , (&&), (++), (.), (<$>), (||), Int, Integer, any, either, error, fromIntegral
+  , id, maybe, otherwise, uncurry, zip
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as Text
 import qualified PostgresqlSyntax.Ast as PGT_AST
 import qualified Squeal.PostgreSQL as S
+
+
+-- | Intermediate representation for a window function call in a SELECT list.
+data WindowFuncInfo = WindowFuncInfo
+  { wfiTargetEl :: PGT_AST.TargetEl
+  , wfiFuncApp :: PGT_AST.FuncApplication
+  , wfiOverClause :: PGT_AST.OverClause
+  }
+  deriving stock (Eq, Show)
+
+
+-- | A wrapper for `PGT_AST.OverClause` to provide an `Ord` instance for sorting and grouping.
+newtype OrdOverClause = OrdOverClause PGT_AST.OverClause
+  deriving stock (Eq, Show)
+
+
+-- Manual Ord instance based on the rendered string representation for simplicity.
+instance Ord OrdOverClause where
+  compare (OrdOverClause c1) (OrdOverClause c2) =
+    compare (show c1) (show c2)
+
+
+-- | `WindowFuncInfo` using `OrdOverClause`.
+data WindowFuncInfo_ = WindowFuncInfo_
+  { wfiTargetEl_ :: PGT_AST.TargetEl
+  , wfiOverClause_ :: OrdOverClause
+  }
+
+
+-- | Classifies a `PGT_AST.TargetEl` as either a normal expression or a window function call.
+isWindowTarget :: PGT_AST.TargetEl -> Either PGT_AST.TargetEl WindowFuncInfo_
+isWindowTarget el = case el of
+    PGT_AST.AliasedExprTargetEl expr _ -> go expr
+    PGT_AST.ImplicitlyAliasedExprTargetEl expr _ -> go expr
+    PGT_AST.ExprTargetEl expr -> go expr
+    _ -> Left el
+  where
+    go
+      ( PGT_AST.CExprAExpr
+          (PGT_AST.FuncCExpr (PGT_AST.ApplicationFuncExpr _app _ _ (Just over)))
+        ) =
+        Right $ WindowFuncInfo_ el (OrdOverClause over)
+    go _ = Left el
 
 
 toSquealQuery
@@ -213,9 +260,7 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
                 when (isJust maybeIntoClause) $
                   fail "INTO clause is not yet supported in this translation."
                 when (isJust maybeWindowClause) $
-                  fail $
-                    "WINDOW clause is not yet supported in this translation "
-                      <> "for NormalSimpleSelect with FROM."
+                  fail "WINDOW clause is not yet supported."
 
                 renderedFromClauseExp <- renderPGTTableRef cteNames fromClause
                 let
@@ -832,65 +877,122 @@ renderPGTTargeting cteNames = \case
     pure (selListExp, fmap NE.toList maybeOnExprs)
 
 
-renderPGTTargetEl
-  :: [Text.Text] -> PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
-renderPGTTargetEl cteNames targetEl mOuterAlias idx =
+renderPGTTargetEl :: [Text.Text] -> PGT_AST.TargetEl -> Int -> Q Exp
+renderPGTTargetEl cteNames targetEl idx =
   let
     (exprAST, mInternalAlias) = case targetEl of
       PGT_AST.AliasedExprTargetEl e an -> (e, Just an)
       PGT_AST.ImplicitlyAliasedExprTargetEl e an -> (e, Just an)
       PGT_AST.ExprTargetEl e -> (e, Nothing)
-      PGT_AST.AsteriskTargetEl ->
-        ( PGT_AST.CExprAExpr
-            ( PGT_AST.AexprConstCExpr
-                PGT_AST.NullAexprConst
-            )
-        , Nothing -- Placeholder for Star, should be S.Star
-        )
-    finalAliasName = mOuterAlias <|> mInternalAlias
+      _ -> error "renderPGTTargetEl called with non-expression TargetEl"
   in
-    case targetEl of
-      PGT_AST.AsteriskTargetEl -> pure $ ConE 'S.Star
-      _ -> do
-        renderedScalarExp <- renderPGTAExpr cteNames exprAST
-        case exprAST of
-          PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr _)
-            | Nothing <- finalAliasName ->
-                pure renderedScalarExp
-          _ -> do
-            let
-              aliasLabelStr =
-                case finalAliasName of
-                  Just ident -> Text.unpack $ getIdentText ident
-                  Nothing -> "_col" <> show idx
-            pure $
-              VarE 'S.as
-                `AppE` renderedScalarExp
-                `AppE` LabelE aliasLabelStr
+    do
+      renderedScalarExp <- renderPGTAExpr cteNames exprAST
+      case exprAST of
+        PGT_AST.CExprAExpr (PGT_AST.ColumnrefCExpr _)
+          | Nothing <- mInternalAlias ->
+              pure renderedScalarExp
+        _ -> do
+          let
+            aliasLabelStr =
+              case mInternalAlias of
+                Just ident -> Text.unpack $ getIdentText ident
+                Nothing -> "_col" <> show idx
+          pure $
+            VarE 'S.as
+              `AppE` renderedScalarExp
+              `AppE` LabelE aliasLabelStr
 
 
 renderPGTTargetList :: [Text.Text] -> PGT_AST.TargetList -> Q Exp
-renderPGTTargetList cteNames (item NE.:| items) = go (item : items) 1
+renderPGTTargetList cteNames (item NE.:| items) = do
+  let
+    allItems = item : items
+    (normalTargets, windowTargets) = partitionEithers (isWindowTarget <$> allItems)
+
+  -- Group window functions by their OVER clause
+  let
+    sortedWindowTargets = sortBy (comparing wfiOverClause_) windowTargets
+    groupedWindowTargets = groupBy ((==) `on` wfiOverClause_) sortedWindowTargets
+
+  -- Render normal targets
+  renderedNormalSelections <-
+    if null normalTargets
+      then pure []
+      else (: []) <$> renderNormalTargetList cteNames normalTargets
+
+  -- Render window target groups
+  (_, renderedWindowSelections) <-
+    foldlM
+      ( \(idx, acc) grp -> do
+          (newIdx, renderedGrp) <- renderWindowGroup cteNames idx grp
+          pure (newIdx, acc ++ [renderedGrp])
+      )
+      (1, [])
+      groupedWindowTargets
+
+  -- Combine all selections
+  let
+    allSelections = renderedNormalSelections ++ renderedWindowSelections
+  case allSelections of
+    [] -> fail "Empty selection list"
+    [sel] -> pure sel
+    (sel : sels) -> pure $ foldl' (\acc s -> ConE 'S.Also `AppE` s `AppE` acc) sel sels
+
+
+renderNormalTargetList :: [Text.Text] -> [PGT_AST.TargetEl] -> Q Exp
+renderNormalTargetList cteNames targets = do
+    let
+      isAsterisk :: PGT_AST.TargetEl -> Bool
+      isAsterisk PGT_AST.AsteriskTargetEl = True
+      isAsterisk _ = False
+
+      isDotStar :: PGT_AST.TargetEl -> Bool
+      isDotStar
+        ( PGT_AST.ExprTargetEl
+            ( PGT_AST.CExprAExpr
+                (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref _ (Just indirection)))
+              )
+          ) =
+          any isAllIndirectionEl (NE.toList indirection)
+      isDotStar _ = False
+
+      isAllIndirectionEl :: PGT_AST.IndirectionEl -> Bool
+      isAllIndirectionEl PGT_AST.AllIndirectionEl = True
+      isAllIndirectionEl _ = False
+
+    let
+      (stars, notStars) = partition isAsterisk targets
+      (dotStars, normalExprs) = partition isDotStar notStars
+
+    renderedStar <-
+      case stars of
+        [] -> pure Nothing
+        [_] -> pure $ Just (ConE 'S.Star)
+        _ -> fail "Multiple `*` in SELECT list is not supported."
+
+    renderedDotStars <- mapM renderPGTTargetElDotStar dotStars
+
+    renderedNormalsExp <-
+      if null normalExprs
+        then pure Nothing
+        else do
+          renderedEls <- zipWithM (renderPGTTargetEl cteNames) normalExprs [1 ..]
+          let
+            npList = foldr (\h t -> ConE '(S.:*) `AppE` h `AppE` t) (ConE 'S.Nil) renderedEls
+          pure $ Just (ConE 'S.List `AppE` npList)
+
+    let
+      allParts =
+        maybe [] pure renderedStar
+          ++ renderedDotStars
+          ++ maybe [] pure renderedNormalsExp
+
+    case allParts of
+      [] -> fail "Empty normal selection list"
+      [sel] -> pure sel
+      (sel : sels) -> pure $ foldl' (\acc s -> ConE 'S.Also `AppE` s `AppE` acc) sel sels
   where
-    isAsterisk :: PGT_AST.TargetEl -> Bool
-    isAsterisk PGT_AST.AsteriskTargetEl = True
-    isAsterisk _ = False
-
-    isDotStar :: PGT_AST.TargetEl -> Bool
-    isDotStar
-      ( PGT_AST.ExprTargetEl
-          ( PGT_AST.CExprAExpr
-              (PGT_AST.ColumnrefCExpr (PGT_AST.Columnref _ (Just indirection)))
-            )
-        ) =
-        any isAllIndirectionEl (NE.toList indirection)
-    isDotStar _ = False
-
-    isAllIndirectionEl :: PGT_AST.IndirectionEl -> Bool
-    isAllIndirectionEl PGT_AST.AllIndirectionEl = True
-    isAllIndirectionEl _ = False
-
-    renderPGTTargetElDotStar :: PGT_AST.TargetEl -> Q Exp
     renderPGTTargetElDotStar
       ( PGT_AST.ExprTargetEl
           ( PGT_AST.CExprAExpr
@@ -908,19 +1010,131 @@ renderPGTTargetList cteNames (item NE.:| items) = go (item : items) 1
     renderPGTTargetElDotStar _ =
       fail "renderPGTTargetElDotStar called with unexpected TargetEl"
 
-    go :: [PGT_AST.TargetEl] -> Int -> Q Exp
-    go [] _ = fail "Empty selection list items in go."
-    go [el] currentIdx = renderOne el currentIdx
-    go (el : more) currentIdx = do
-      renderedEl <- renderOne el currentIdx
-      restRendered <- go more (currentIdx + 1)
-      pure $ ConE 'S.Also `AppE` restRendered `AppE` renderedEl
 
-    renderOne :: PGT_AST.TargetEl -> Int -> Q Exp
-    renderOne el idx
-      | isAsterisk el = pure $ ConE 'S.Star
-      | isDotStar el = renderPGTTargetElDotStar el
-      | otherwise = renderPGTTargetEl cteNames el Nothing idx
+renderWindowGroup :: [Text.Text] -> Int -> [WindowFuncInfo_] -> Q (Int, Exp)
+renderWindowGroup cteNames startIdx = \case
+  [] -> fail "renderWindowGroup: received an empty group, this should not happen."
+  group@(head_info : _) -> do
+    let
+      OrdOverClause overClause = wfiOverClause_ head_info
+    windowDefExp <-
+      case overClause of
+        PGT_AST.ColIdOverClause _ -> fail "WINDOW clause with named windows is not supported yet."
+        PGT_AST.WindowOverClause spec -> renderPGTWindowSpecification cteNames spec
+
+    (newIdx, windowFuncsNP) <-
+      renderWindowFuncsNP cteNames startIdx (wfiTargetEl_ <$> group)
+
+    pure $ (newIdx, ConE 'S.Over `AppE` windowFuncsNP `AppE` windowDefExp)
+
+
+renderPGTWindowSpecification
+  :: [Text.Text] -> PGT_AST.WindowSpecification -> Q Exp
+renderPGTWindowSpecification cteNames (PGT_AST.WindowSpecification mExisting mPartition mSort mFrame) = do
+  when (isJust mExisting) $ fail "Existing window names are not supported yet."
+  when (isJust mFrame) $
+    fail "Frame clauses (ROWS/RANGE/GROUPS) are not supported yet."
+
+  partitionByExp <-
+    case mPartition of
+      Nothing -> pure $ VarE 'S.partitionBy `AppE` ConE 'S.Nil
+      Just partitionExps -> do
+        renderedExps <- mapM (renderPGTAExpr cteNames) partitionExps
+        let
+          np = foldr (\h t -> ConE '(S.:*) `AppE` h `AppE` t) (ConE 'S.Nil) renderedExps
+        pure $ VarE 'S.partitionBy `AppE` np
+
+  case mSort of
+    Nothing -> pure partitionByExp
+    Just sortClause -> do
+      renderedSC <- renderPGTSortClause cteNames sortClause
+      pure $
+        InfixE
+          (Just partitionByExp)
+          (VarE '(S.&))
+          (Just (VarE 'S.orderBy `AppE` renderedSC))
+
+
+renderWindowFuncsNP :: [Text.Text] -> Int -> [PGT_AST.TargetEl] -> Q (Int, Exp)
+renderWindowFuncsNP cteNames startIdx targets = do
+  let
+    indexedTargets = zip targets [startIdx ..]
+  renderedFuncs <-
+    mapM (uncurry (renderWindowFuncAsAliasedNP cteNames)) indexedTargets
+  let
+    newIdx = startIdx + length targets
+  pure $
+    ( newIdx
+    , foldr (\h t -> ConE '(S.:*) `AppE` h `AppE` t) (ConE 'S.Nil) renderedFuncs
+    )
+
+
+renderWindowFuncAsAliasedNP :: [Text.Text] -> PGT_AST.TargetEl -> Int -> Q Exp
+renderWindowFuncAsAliasedNP cteNames el idx = do
+  let
+    (funcApp, mAlias) = case el of
+      PGT_AST.AliasedExprTargetEl
+        (PGT_AST.CExprAExpr (PGT_AST.FuncCExpr (PGT_AST.ApplicationFuncExpr app _ _ _)))
+        an -> (app, Just an)
+      PGT_AST.ImplicitlyAliasedExprTargetEl
+        (PGT_AST.CExprAExpr (PGT_AST.FuncCExpr (PGT_AST.ApplicationFuncExpr app _ _ _)))
+        an -> (app, Just an)
+      PGT_AST.ExprTargetEl
+        (PGT_AST.CExprAExpr (PGT_AST.FuncCExpr (PGT_AST.ApplicationFuncExpr app _ _ _))) -> (app, Nothing)
+      _ -> error "renderWindowFuncAsAliasedNP: not a window function"
+
+  let
+    aliasStr = case mAlias of
+      Just ident -> Text.unpack (getIdentText ident)
+      Nothing -> "_window" <> show idx
+
+  renderedFunc <- renderPGTFuncAppAsWindowFunc cteNames funcApp
+
+  pure $ VarE 'S.as `AppE` renderedFunc `AppE` LabelE aliasStr
+
+
+renderPGTFuncAppAsWindowFunc :: [Text.Text] -> PGT_AST.FuncApplication -> Q Exp
+renderPGTFuncAppAsWindowFunc cteNames (PGT_AST.FuncApplication funcName maybeParams) = do
+  (squealFn, isCount) <-
+    case funcName of
+      PGT_AST.TypeFuncName fident -> do
+        let
+          fnNameStr = Text.toLower (getIdentText fident)
+        case fnNameStr of
+          "rank" -> pure (VarE 'S.rank, False)
+          "row_number" -> pure (VarE 'S.rowNumber, False)
+          "dense_rank" -> pure (VarE 'S.denseRank, False)
+          "percent_rank" -> pure (VarE 'S.percentRank, False)
+          "cume_dist" -> pure (VarE 'S.cumeDist, False)
+          "ntile" -> pure (VarE 'S.ntile, False)
+          "lag" -> pure (VarE 'S.lag, False)
+          "lead" -> pure (VarE 'S.lead, False)
+          "first_value" -> pure (VarE 'S.firstValue, False)
+          "last_value" -> pure (VarE 'S.lastValue, False)
+          "nth_value" -> pure (VarE 'S.nthValue, False)
+          "count" -> pure (VarE 'S.count, True)
+          "sum" -> pure (VarE 'S.sum_, False)
+          "avg" -> pure (VarE 'S.avg, False)
+          "min" -> pure (VarE 'S.min_, False)
+          "max" -> pure (VarE 'S.max_, False)
+          _ -> fail $ "Unsupported window function: " <> Text.unpack fnNameStr
+      _ -> fail "Unsupported function name in window function"
+
+  case maybeParams of
+    Nothing -> pure squealFn
+    Just PGT_AST.StarFuncApplicationParams
+      | isCount -> pure $ VarE 'S.countStar
+      | otherwise ->
+          fail "Star argument is only supported for COUNT in window functions."
+    Just (PGT_AST.NormalFuncApplicationParams (Just True) _ _) ->
+      fail "DISTINCT is not supported for window functions."
+    Just (PGT_AST.NormalFuncApplicationParams _ args _) -> do
+      argExps <- mapM (renderPGTFuncArgExpr cteNames) (NE.toList args)
+      let
+        npArgs = foldr (\h t -> ConE '(S.:*) `AppE` h `AppE` t) (ConE 'S.Nil) argExps
+        windowArg = ConE 'S.Windows `AppE` npArgs
+      pure $ squealFn `AppE` windowArg
+    _ -> fail "Unsupported parameters for window function"
 
 
 -- | Defines associativity of an operator.
@@ -1249,7 +1463,8 @@ renderPGTFuncExpr cteNames = \case
   PGT_AST.ApplicationFuncExpr funcApp maybeWithinGroup maybeFilter maybeOver -> do
     when (isJust maybeWithinGroup) $ fail "WITHIN GROUP clause is not supported."
     when (isJust maybeFilter) $ fail "FILTER clause is not supported."
-    when (isJust maybeOver) $ fail "OVER clause is not supported."
+    when (isJust maybeOver) $
+      fail "OVER clause is only supported at the top level of a SELECT list item."
     renderPGTFuncApplication cteNames funcApp
   PGT_AST.SubexprFuncExpr funcCommonSubexpr -> renderPGTFuncExprCommonSubexpr cteNames funcCommonSubexpr
 

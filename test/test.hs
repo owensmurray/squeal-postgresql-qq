@@ -1798,6 +1798,106 @@ main =
                 "SELECT \"employee_id\" AS \"employee_id\", count(ALL \"id\") AS \"_col2\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\" HAVING (count(ALL \"id\") > 1)"
             checkStatement squealRendering statement
 
+      describe "window functions" $ do
+        it "select name, row_number() over () as rn from users" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "name" Text
+                   , ( Field "rn" Int64
+                     , ()
+                     )
+                   )
+            statement = [ssql| select name, row_number() over () as rn from users |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"name\" AS \"name\", row_number() OVER () AS \"rn\" FROM \"users\" AS \"users\""
+          checkStatement squealRendering statement
+
+        it
+          "select name, rank() over (partition by employee_id order by name) as r from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "r" Int64
+                       , ()
+                       )
+                     )
+              statement =
+                [ssql| select name, rank() over (partition by employee_id order by name) as r from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", rank() OVER (PARTITION BY \"employee_id\" ORDER BY \"name\" ASC) AS \"r\" FROM \"users\" AS \"users\""
+            checkStatement squealRendering statement
+
+        it "select email, sum(id) over (partition by user_id) as user_total from emails" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "email" (Maybe Text)
+                   , ( Field "user_total" (Maybe Int64)
+                     , ()
+                     )
+                   )
+            statement =
+              [ssql| select email, sum(id) over (partition by user_id) as user_total from emails |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"email\" AS \"email\", sum(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_total\" FROM \"emails\" AS \"emails\""
+          checkStatement squealRendering statement
+
+        it
+          "select name, row_number() over (order by name), rank() over (order by name) from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "_window1" Int64
+                       , ( Field "_window2" Int64
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql| select name, row_number() over (order by name), rank() over (order by name) from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", row_number() OVER ( ORDER BY \"name\" ASC) AS \"_window1\", rank() OVER ( ORDER BY \"name\" ASC) AS \"_window2\" FROM \"users\" AS \"users\""
+            checkStatement squealRendering statement
+
+        it
+          "select name, row_number() over (partition by employee_id order by name), rank() over (order by name) from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "_window1" Int64
+                       , ( Field "_window2" Int64
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql| select name, row_number() over (partition by employee_id order by name), rank() over (order by name) from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", row_number() OVER (PARTITION BY \"employee_id\" ORDER BY \"name\" ASC) AS \"_window1\", rank() OVER ( ORDER BY \"name\" ASC) AS \"_window2\" FROM \"users\" AS \"users\""
+            checkStatement squealRendering statement
+
 
 _printQuery :: (RenderSQL a) => a -> IO ()
 _printQuery = putStrLn . T.unpack . TE.decodeUtf8 . renderSQL
