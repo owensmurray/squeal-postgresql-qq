@@ -140,12 +140,10 @@ toSquealSelectNoParens
       maybeSelectLimit
       maybeForLockingClause
     ) = do
-    (cteNames, renderedWithClause) <-
+    (cteNames, withApp) <-
       case maybeWithClause of
-        Nothing -> pure (initialCteNames, Nothing)
-        Just withClause -> do
-          (names, exp) <- renderPGTWithClause initialCteNames withClause
-          pure (names, Just exp)
+        Nothing -> pure (initialCteNames, id)
+        Just withClause -> renderPGTWithClause initialCteNames withClause
 
     squealQueryBody <-
       case selectClause of
@@ -159,32 +157,42 @@ toSquealSelectNoParens
             maybeForLockingClause
         Right selectWithParens' -> toSquealSelectWithParens cteNames maybeColAliases selectWithParens'
 
-    case renderedWithClause of
-      Nothing -> pure squealQueryBody
-      Just withExp -> pure $ VarE 'S.with `AppE` withExp `AppE` squealQueryBody
+    pure $ withApp squealQueryBody
 
 
-renderPGTWithClause :: [Text.Text] -> PGT_AST.WithClause -> Q ([Text.Text], Exp)
-renderPGTWithClause initialCteNames (PGT_AST.WithClause recursive ctes) = do
-    when recursive $ fail "Recursive WITH clauses are not supported yet."
-    let
-      cteList = NE.toList ctes
-    (finalCteNames, renderedCtes) <-
-      foldlM
-        ( \(names, exps) cte -> do
-            (name, exp) <- renderCte names cte
-            pure (names <> [name], exps <> [exp])
-        )
-        (initialCteNames, [])
-        cteList
+renderPGTWithClause
+  :: [Text.Text] -> PGT_AST.WithClause -> Q ([Text.Text], Exp -> Exp)
+renderPGTWithClause initialCteNames (PGT_AST.WithClause recursive ctes) =
+    if recursive
+      then do
+        case NE.toList ctes of
+          [cte] -> do
+            (cteName, aliasedCteQueryExp) <- renderRecursiveCte initialCteNames cte
+            let
+              withApp body = VarE 'S.withRecursive `AppE` aliasedCteQueryExp `AppE` body
+            pure (initialCteNames <> [cteName], withApp)
+          _ -> fail "Squeal-QQ currently only supports WITH RECURSIVE with a single CTE."
+      else do
+        let
+          cteList = NE.toList ctes
+        (finalCteNames, renderedCtes) <-
+          foldlM
+            ( \(names, exps) cte -> do
+                (name, exp) <- renderCte names cte
+                pure (names <> [name], exps <> [exp])
+            )
+            (initialCteNames, [])
+            cteList
 
-    let
-      withExp =
-        foldr
-          (\cte acc -> ConE '(S.:>>) `AppE` cte `AppE` acc)
-          (ConE 'S.Done)
-          renderedCtes
-    pure (finalCteNames, withExp)
+        let
+          withExp =
+            foldr
+              (\cte acc -> ConE '(S.:>>) `AppE` cte `AppE` acc)
+              (ConE 'S.Done)
+              renderedCtes
+        let
+          withApp body = VarE 'S.with `AppE` withExp `AppE` body
+        pure (finalCteNames, withApp)
   where
     renderCte :: [Text.Text] -> PGT_AST.CommonTableExpr -> Q (Text.Text, Exp)
     renderCte existingCteNames (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
@@ -200,6 +208,26 @@ renderPGTWithClause initialCteNames (PGT_AST.WithClause recursive ctes) = do
         cteName = getIdentText ident
       pure
         (cteName, VarE 'S.as `AppE` cteQueryExp `AppE` LabelE (Text.unpack cteName))
+
+    renderRecursiveCte
+      :: [Text.Text] -> PGT_AST.CommonTableExpr -> Q (Text.Text, Exp)
+    renderRecursiveCte existingCteNames (PGT_AST.CommonTableExpr ident maybeColNames maybeMaterialized stmt) = do
+      when (isJust maybeColNames) $
+        fail "Column name lists in CTEs are not supported yet."
+      when (isJust maybeMaterialized) $
+        fail "MATERIALIZED/NOT MATERIALIZED for CTEs is not supported yet."
+      let
+        cteName = getIdentText ident
+      -- For a recursive CTE, its own name must be in scope for the query inside it.
+      let
+        ctesInScope = existingCteNames <> [cteName]
+      cteQueryExp <-
+        case stmt of
+          PGT_AST.SelectPreparableStmt selectStmt -> toSquealQuery ctesInScope Nothing selectStmt
+          _ -> fail "Only SELECT statements are supported in CTEs."
+      let
+        aliasedQuery = VarE 'S.as `AppE` cteQueryExp `AppE` LabelE (Text.unpack cteName)
+      pure (cteName, aliasedQuery)
 
 
 toSquealSimpleSelect
