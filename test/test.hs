@@ -637,6 +637,70 @@ main =
                 "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\"), \"emails_cte\" AS (SELECT * FROM \"emails\" AS \"emails\") SELECT \"users_cte\".*, \"emails_cte\".\"email\" AS \"email\" FROM \"users_cte\" AS \"users_cte\" INNER JOIN \"emails_cte\" AS \"emails_cte\" ON (\"users_cte\".\"id\" = \"emails_cte\".\"user_id\")"
             checkStatement squealRendering statement
 
+      describe "set operations" $ do
+        it "select name from users union select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users union select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") UNION (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "select name from users union all select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users union all select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") UNION ALL (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "select name from users intersect select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users intersect select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") INTERSECT (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "select name from users intersect all select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users intersect all select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") INTERSECT ALL (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "select name from users except select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users except select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") EXCEPT (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "select name from users except all select name from users_copy" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| select name from users except all select name from users_copy |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") EXCEPT ALL (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
+        it "(select name from users) union (select name from users_copy)" $ do
+          let
+            statement :: Statement DB () (Field "name" Text, ())
+            statement = [ssql| (select name from users) union (select name from users_copy) |]
+            squealRendering :: Text
+            squealRendering =
+              "(SELECT \"name\" AS \"name\" FROM \"users\" AS \"users\") UNION (SELECT \"name\" AS \"name\" FROM \"users_copy\" AS \"users_copy\")"
+          checkStatement squealRendering statement
+
     describe "inserts" $ do
       it "insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar')" $ do
         let

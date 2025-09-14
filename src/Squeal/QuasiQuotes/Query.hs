@@ -108,6 +108,23 @@ toSquealSelectWithParens cteNames maybeColAliases = \case
     toSquealSelectWithParens cteNames maybeColAliases swp
 
 
+toSquealSelectClause
+  :: [Text.Text]
+  -> Maybe (NE.NonEmpty PGT_AST.Ident)
+  -> PGT_AST.SelectClause
+  -> Q Exp
+toSquealSelectClause cteNames maybeColAliases = \case
+  Left simpleSelect ->
+    toSquealSimpleSelect
+      cteNames
+      maybeColAliases
+      simpleSelect
+      Nothing
+      Nothing
+      Nothing
+  Right selectWithParens -> toSquealSelectWithParens cteNames maybeColAliases selectWithParens
+
+
 toSquealSelectNoParens
   :: [Text.Text]
   -> Maybe (NE.NonEmpty PGT_AST.Ident)
@@ -195,6 +212,28 @@ toSquealSimpleSelect
   -> Q Exp
 toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybeSelectLimit maybeForLockingClause =
   case simpleSelect of
+    PGT_AST.BinSimpleSelect op left allOrDistinct right -> do
+      when
+        ( isJust maybeSortClause
+            || isJust maybeSelectLimit
+            || isJust maybeForLockingClause
+        )
+        $ fail
+          "ORDER BY, LIMIT, OFFSET, and FOR clauses are not supported on the immediate operands of a set operation. You can use parentheses to specify precedence."
+
+      leftQuery <- toSquealSelectClause cteNames maybeColAliases left
+      rightQuery <- toSquealSelectClause cteNames maybeColAliases right
+
+      let
+        squealOp = case (op, allOrDistinct) of
+          (PGT_AST.UnionSelectBinOp, Just False) -> VarE 'S.unionAll
+          (PGT_AST.UnionSelectBinOp, _) -> VarE 'S.union
+          (PGT_AST.IntersectSelectBinOp, Just False) -> VarE 'S.intersectAll
+          (PGT_AST.IntersectSelectBinOp, _) -> VarE 'S.intersect
+          (PGT_AST.ExceptSelectBinOp, Just False) -> VarE 'S.exceptAll
+          (PGT_AST.ExceptSelectBinOp, _) -> VarE 'S.except
+
+      pure $ squealOp `AppE` leftQuery `AppE` rightQuery
     PGT_AST.ValuesSimpleSelect valuesClause -> do
       unless
         ( isNothing maybeSortClause
