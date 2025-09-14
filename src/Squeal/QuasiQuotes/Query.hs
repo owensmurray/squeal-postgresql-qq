@@ -318,37 +318,37 @@ renderValuesClauseToNP
   -> PGT_AST.ValuesClause
   -> Q Exp
 renderValuesClauseToNP cteNames maybeColAliases (firstRowExps NE.:| restRowExps) = do
-  unless (null restRowExps) $
-    fail $
-      "Multi-row VALUES clause requires S.values, this translation "
-        <> "currently supports single row S.values_."
-  convertRowToNP firstRowExps
- where
-  colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
+    unless (null restRowExps) $
+      fail $
+        "Multi-row VALUES clause requires S.values, this translation "
+          <> "currently supports single row S.values_."
+    convertRowToNP firstRowExps
+  where
+    colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
 
-  convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
-  convertRowToNP exprs = do
-    let
-      exprList = NE.toList exprs
-    aliasTexts <-
-      case colAliasTexts of
-        Just aliases ->
-          if length aliases == length exprList
-            then pure aliases
-            else
-              fail
-                "Number of column aliases in CTE does not match number of columns in VALUES clause."
-        Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
-    go (zip exprList aliasTexts)
-   where
-    go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
-    go [] = pure $ ConE 'S.Nil
-    go ((expr, aliasText) : fs) = do
-      renderedExpr <- renderPGTAExpr cteNames expr
-      let
-        aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
-      restExp <- go fs
-      pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
+    convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
+    convertRowToNP exprs = do
+        let
+          exprList = NE.toList exprs
+        aliasTexts <-
+          case colAliasTexts of
+            Just aliases ->
+              if length aliases == length exprList
+                then pure aliases
+                else
+                  fail
+                    "Number of column aliases in CTE does not match number of columns in VALUES clause."
+            Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
+        go (zip exprList aliasTexts)
+      where
+        go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
+        go [] = pure $ ConE 'S.Nil
+        go ((expr, aliasText) : fs) = do
+          renderedExpr <- renderPGTAExpr cteNames expr
+          let
+            aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
+          restExp <- go fs
+          pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
 
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
@@ -439,6 +439,7 @@ renderPGTGroupByClauseElements cteNames = \case
         (ConE 'S.Nil)
         renderedExprs
 
+
 renderPGTGroupByItem :: [Text.Text] -> PGT_AST.GroupByItem -> Q Exp
 renderPGTGroupByItem cteNames = \case
   PGT_AST.ExprGroupByItem scalarExpr -> renderPGTAExpr cteNames scalarExpr
@@ -448,7 +449,8 @@ renderPGTGroupByItem cteNames = \case
       "Unsupported grouping expression: " <> show unsupportedGroup
 
 
-processSelectLimit :: [Text.Text] -> Exp -> Maybe PGT_AST.SelectLimit -> Q (Exp, Maybe Exp)
+processSelectLimit
+  :: [Text.Text] -> Exp -> Maybe PGT_AST.SelectLimit -> Q (Exp, Maybe Exp)
 processSelectLimit _cteNames tableExpr Nothing = pure (tableExpr, Nothing)
 processSelectLimit cteNames tableExpr (Just selectLimit) = do
   let
@@ -622,16 +624,16 @@ renderPGTTargetingForValues cteNames = \case
 
 renderPGTOnExpressionsClause :: [Text.Text] -> [PGT_AST.AExpr] -> Q Exp
 renderPGTOnExpressionsClause cteNames exprs = do
-  renderedSortExps <- mapM renderToSortExpr exprs
-  pure $ ListE renderedSortExps
- where
-  renderToSortExpr :: PGT_AST.AExpr -> Q Exp
-  renderToSortExpr astExpr = do
-    squealExpr <- renderPGTAExpr cteNames astExpr
-    -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
-    -- are typically specified in the ORDER BY clause.
-    -- Here, we default to ASC for the SortExpression constructor.
-    pure $ ConE 'S.Asc `AppE` squealExpr
+    renderedSortExps <- mapM renderToSortExpr exprs
+    pure $ ListE renderedSortExps
+  where
+    renderToSortExpr :: PGT_AST.AExpr -> Q Exp
+    renderToSortExpr astExpr = do
+      squealExpr <- renderPGTAExpr cteNames astExpr
+      -- For DISTINCT ON, the direction (ASC/DESC) and NULLS order
+      -- are typically specified in the ORDER BY clause.
+      -- Here, we default to ASC for the SortExpression constructor.
+      pure $ ConE 'S.Asc `AppE` squealExpr
 
 
 renderPGTSortClause :: [Text.Text] -> PGT_AST.SortClause -> Q Exp
@@ -830,7 +832,8 @@ renderPGTTargeting cteNames = \case
     pure (selListExp, fmap NE.toList maybeOnExprs)
 
 
-renderPGTTargetEl :: [Text.Text] -> PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
+renderPGTTargetEl
+  :: [Text.Text] -> PGT_AST.TargetEl -> Maybe PGT_AST.Ident -> Int -> Q Exp
 renderPGTTargetEl cteNames targetEl mOuterAlias idx =
   let
     (exprAST, mInternalAlias) = case targetEl of
@@ -1184,7 +1187,8 @@ renderPGTAExpr cteNames astExpr = case fixOperatorPrecedence astExpr of
       PGT_AST.InAExprReversableOp inExpr ->
         case inExpr of
           PGT_AST.ExprListInExpr exprList -> do
-            let opVar' = if not then VarE 'S.notIn else VarE 'S.in_
+            let
+              opVar' = if not then VarE 'S.notIn else VarE 'S.in_
             listExp' <- ListE <$> mapM (renderPGTAExpr cteNames) (NE.toList exprList)
             pure $ opVar' `AppE` renderedExpr' `AppE` listExp'
           PGT_AST.SelectInExpr selectWithParens -> do
@@ -1325,7 +1329,8 @@ renderPGTFuncArgExpr cteNames = \case
   _ -> fail "Named or colon-syntax function arguments not supported"
 
 
-renderPGTFuncExprCommonSubexpr :: [Text.Text] -> PGT_AST.FuncExprCommonSubexpr -> Q Exp
+renderPGTFuncExprCommonSubexpr
+  :: [Text.Text] -> PGT_AST.FuncExprCommonSubexpr -> Q Exp
 renderPGTFuncExprCommonSubexpr cteNames = \case
   PGT_AST.CurrentTimestampFuncExprCommonSubexpr (Just _) ->
     fail "CURRENT_TIMESTAMP with precision is not supported."
