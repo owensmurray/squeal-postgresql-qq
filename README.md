@@ -169,6 +169,12 @@ inserts
     insert into emails (id, user_id, email) values (1, 'user-1', 'foo@bar') returning * [✔]
   with common table expressions
     with new_user (id, name, bio) as (values ('id_new', 'new_name', 'new_bio')) insert into users_copy select * from new_user [✔]
+  on conflict
+    insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing [✔]
+    insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name' [✔]
+    insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do update set name = 'new_name' where users_copy.name = 'old_name' [✔]
+    insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing returning id [✔]
+    insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name' returning * [✔]
 deletes
   delete from users where true [✔]
   delete from emails where id = 1 [✔]
