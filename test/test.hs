@@ -594,7 +594,11 @@ main =
                        )
                      )
                    )
-            statement = [ssql| with users_cte as (select * from users) select * from users_cte |]
+            statement =
+              [ssql|
+                with users_cte as (select * from users)
+                select * from users_cte
+              |]
             squealRendering :: Text
             squealRendering =
               "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\") SELECT * FROM \"users_cte\" AS \"users_cte\""
@@ -942,91 +946,101 @@ main =
             checkStatement squealRendering statement
 
       describe "on conflict" $ do
-        it "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing" $ do
-          let
-            statement :: Statement DB () ()
-            statement =
-              [ssql|
+        it
+          "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
                 insert into users_copy (id, name, bio)
                 values ('id1', 'name1', null)
                 on conflict on constraint pk_users_copy do nothing
               |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO NOTHING"
-          checkStatement squealRendering statement
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO NOTHING"
+            checkStatement squealRendering statement
 
-        it "insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name'" $ do
-          let
-            statement :: Statement DB () ()
-            statement =
-              [ssql|
+        it
+          "insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name'"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
                 insert into users_copy (id, name, bio)
                 values ('id1', 'name1', 'bio1')
                 on conflict on constraint pk_users_copy
                 do update set name = 'new_name'
               |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), (E'bio1' :: text)) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text)"
-          checkStatement squealRendering statement
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), (E'bio1' :: text)) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text)"
+            checkStatement squealRendering statement
 
-        it "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do update set name = 'new_name' where users_copy.name = 'old_name'" $ do
-          let
-            statement :: Statement DB () ()
-            statement =
-              [ssql|
+        it
+          "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do update set name = 'new_name' where users_copy.name = 'old_name'"
+          $ do
+            let
+              statement :: Statement DB () ()
+              statement =
+                [ssql|
                 insert into users_copy (id, name, bio)
                 values ('id1', 'name1', null)
                 on conflict on constraint pk_users_copy
                 do update set name = 'new_name'
                 where users_copy.name = 'old_name'
               |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text) WHERE (\"users_copy\".\"name\" = (E'old_name' :: text))"
-          checkStatement squealRendering statement
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text) WHERE (\"users_copy\".\"name\" = (E'old_name' :: text))"
+            checkStatement squealRendering statement
 
-        it "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing returning id" $ do
-          let
-            statement :: Statement DB () (Field "id" Text, ())
-            statement =
-              [ssql|
+        it
+          "insert into users_copy (id, name, bio) values ('id1', 'name1', null) on conflict on constraint pk_users_copy do nothing returning id"
+          $ do
+            let
+              statement :: Statement DB () (Field "id" Text, ())
+              statement =
+                [ssql|
                 insert into users_copy (id, name, bio)
                 values ('id1', 'name1', null)
                 on conflict on constraint pk_users_copy do nothing
                 returning id
               |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO NOTHING RETURNING \"id\" AS \"id\""
-          checkStatement squealRendering statement
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), NULL) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO NOTHING RETURNING \"id\" AS \"id\""
+            checkStatement squealRendering statement
 
-        it "insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name' returning *" $ do
-          let
-            statement
-              :: Statement
-                   DB
-                   ()
-                   ( Field "id" Text
-                   , ( Field "name" Text
-                     , ( Field "bio" (Maybe Text)
-                       , ()
+        it
+          "insert into users_copy (id, name, bio) values ('id1', 'name1', 'bio1') on conflict on constraint pk_users_copy do update set name = 'new_name' returning *"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "id" Text
+                     , ( Field "name" Text
+                       , ( Field "bio" (Maybe Text)
+                         , ()
+                         )
                        )
                      )
-                   )
-            statement =
-              [ssql|
+              statement =
+                [ssql|
                 insert into users_copy (id, name, bio)
                 values ('id1', 'name1', 'bio1')
                 on conflict on constraint pk_users_copy
                 do update set name = 'new_name'
                 returning *
               |]
-            squealRendering :: Text
-            squealRendering =
-              "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), (E'bio1' :: text)) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text) RETURNING *"
-          checkStatement squealRendering statement
+              squealRendering :: Text
+              squealRendering =
+                "INSERT INTO \"users_copy\" AS \"users_copy\" (\"id\", \"name\", \"bio\") VALUES ((E'id1' :: text), (E'name1' :: text), (E'bio1' :: text)) ON CONFLICT ON CONSTRAINT \"pk_users_copy\" DO UPDATE SET \"name\" = (E'new_name' :: text) RETURNING *"
+            checkStatement squealRendering statement
 
     describe "deletes" $ do
       it "delete from users where true" $ do
@@ -1782,6 +1796,106 @@ main =
               squealRendering :: Text
               squealRendering =
                 "SELECT \"employee_id\" AS \"employee_id\", count(ALL \"id\") AS \"_col2\" FROM \"users\" AS \"users\" GROUP BY \"employee_id\" HAVING (count(ALL \"id\") > 1)"
+            checkStatement squealRendering statement
+
+      describe "window functions" $ do
+        it "select name, row_number() over () as rn from users" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "name" Text
+                   , ( Field "rn" Int64
+                     , ()
+                     )
+                   )
+            statement = [ssql| select name, row_number() over () as rn from users |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"name\" AS \"name\", row_number() OVER () AS \"rn\" FROM \"users\" AS \"users\""
+          checkStatement squealRendering statement
+
+        it
+          "select name, rank() over (partition by employee_id order by name) as r from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "r" Int64
+                       , ()
+                       )
+                     )
+              statement =
+                [ssql| select name, rank() over (partition by employee_id order by name) as r from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", rank() OVER (PARTITION BY \"employee_id\" ORDER BY \"name\" ASC) AS \"r\" FROM \"users\" AS \"users\""
+            checkStatement squealRendering statement
+
+        it "select email, sum(id) over (partition by user_id) as user_total from emails" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "email" (Maybe Text)
+                   , ( Field "user_total" (Maybe Int64)
+                     , ()
+                     )
+                   )
+            statement =
+              [ssql| select email, sum(id) over (partition by user_id) as user_total from emails |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"email\" AS \"email\", sum(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_total\" FROM \"emails\" AS \"emails\""
+          checkStatement squealRendering statement
+
+        it
+          "select name, row_number() over (order by name), rank() over (order by name) from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "_window1" Int64
+                       , ( Field "_window2" Int64
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql| select name, row_number() over (order by name), rank() over (order by name) from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", row_number() OVER ( ORDER BY \"name\" ASC) AS \"_window1\", rank() OVER ( ORDER BY \"name\" ASC) AS \"_window2\" FROM \"users\" AS \"users\""
+            checkStatement squealRendering statement
+
+        it
+          "select name, row_number() over (partition by employee_id order by name), rank() over (order by name) from users"
+          $ do
+            let
+              statement
+                :: Statement
+                     DB
+                     ()
+                     ( Field "name" Text
+                     , ( Field "_window1" Int64
+                       , ( Field "_window2" Int64
+                         , ()
+                         )
+                       )
+                     )
+              statement =
+                [ssql| select name, row_number() over (partition by employee_id order by name), rank() over (order by name) from users |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT \"name\" AS \"name\", row_number() OVER (PARTITION BY \"employee_id\" ORDER BY \"name\" ASC) AS \"_window1\", rank() OVER ( ORDER BY \"name\" ASC) AS \"_window2\" FROM \"users\" AS \"users\""
             checkStatement squealRendering statement
 
 
