@@ -18,7 +18,7 @@ module Squeal.QuasiQuotes.Query (
 
 import Control.Monad (unless, when, zipWithM)
 import Data.Either (partitionEithers)
-import Data.Foldable (foldlM)
+import Data.Foldable (Foldable(elem, foldl', foldr, length, null), any, foldlM)
 import Data.Function (on)
 import Data.List (groupBy, partition, sortBy)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -30,11 +30,10 @@ import Language.Haskell.TH.Syntax
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(elem, foldl', foldr, length, null), Functor(fmap)
-  , Maybe(Just, Nothing), MonadFail(fail), Num((*), (+), (-), fromInteger)
-  , Ord((<), (>=), compare), Semigroup((<>)), Show(show), Traversable(mapM), ($)
-  , (&&), (++), (.), (<$>), (||), Int, Integer, any, either, error, fromIntegral
-  , id, maybe, otherwise, uncurry, zip
+  , Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
+  , Num((*), (+), (-), fromInteger), Ord((<), (>=), compare), Semigroup((<>))
+  , Show(show), Traversable(mapM), ($), (&&), (++), (.), (<$>), (||), Int
+  , Integer, either, error, fromIntegral, id, maybe, otherwise, uncurry, zip
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
@@ -1544,8 +1543,9 @@ renderPGTFuncApplication cteNames (PGT_AST.FuncApplication funcName maybeParams)
     PGT_AST.TypeFuncName fident ->
       let
         fnNameStr = Text.unpack (getIdentText fident)
+        fnNameStrLower = Text.toLower (getIdentText fident)
       in
-        case Text.toLower (Text.pack fnNameStr) of
+        case fnNameStrLower of
           "inline" ->
             case maybeParams of
               Just (PGT_AST.NormalFuncApplicationParams _ args _) ->
@@ -1572,37 +1572,46 @@ renderPGTFuncApplication cteNames (PGT_AST.FuncApplication funcName maybeParams)
                       pure $ VarE 'S.inlineParam `AppE` VarE varName
                   _ -> fail "inline_param() function expects a single variable argument"
               _ -> fail "inline_param() function expects a single variable argument"
-          otherFnName ->
-            let
-              squealFn :: Q Exp
-              squealFn =
-                case otherFnName of
-                  "coalesce" -> pure $ VarE 'S.coalesce
-                  "lower" -> pure $ VarE 'S.lower
-                  "char_length" -> pure $ VarE 'S.charLength
-                  "character_length" -> pure $ VarE 'S.charLength
-                  "upper" -> pure $ VarE 'S.upper
-                  "count" -> pure $ VarE 'S.count -- Special handling for count(*) might be needed
-                  "now" -> pure $ VarE 'S.now
-                  _ -> fail $ "Unsupported function: " <> fnNameStr
-            in
-              case maybeParams of
-                Nothing -> squealFn -- No-argument function
-                Just params -> case params of
-                  PGT_AST.NormalFuncApplicationParams maybeAllOrDistinct args maybeSortClause -> do
-                    when (isJust maybeAllOrDistinct) $
-                      fail "DISTINCT in function calls is not supported."
-                    when (isJust maybeSortClause) $
-                      fail "ORDER BY in function calls is not supported."
-                    fn <- squealFn
-                    argExps <- mapM (renderPGTFuncArgExpr cteNames) (NE.toList args)
-                    pure $ foldl' AppE fn argExps
-                  PGT_AST.StarFuncApplicationParams ->
-                    -- Specific for count(*)
-                    if fnNameStr == "count"
-                      then pure $ VarE 'S.countStar
-                      else fail "Star argument only supported for COUNT"
-                  _ -> fail $ "Unsupported function parameters structure: " <> show params
+          _ -> do
+            (squealFn, isAggregate) <-
+              case fnNameStrLower of
+                "coalesce" -> pure (VarE 'S.coalesce, False)
+                "lower" -> pure (VarE 'S.lower, False)
+                "char_length" -> pure (VarE 'S.charLength, False)
+                "character_length" -> pure (VarE 'S.charLength, False)
+                "upper" -> pure (VarE 'S.upper, False)
+                "now" -> pure (VarE 'S.now, False)
+                "count" -> pure (VarE 'S.count, True)
+                "sum" -> pure (VarE 'S.sum_, True)
+                "avg" -> pure (VarE 'S.avg, True)
+                "min" -> pure (VarE 'S.min_, True)
+                "max" -> pure (VarE 'S.max_, True)
+                _ -> fail $ "Unsupported function: " <> fnNameStr
+
+            case maybeParams of
+              Nothing -> pure squealFn
+              Just params -> case params of
+                PGT_AST.NormalFuncApplicationParams maybeAllOrDistinct args maybeSortClause -> do
+                  when (isJust maybeSortClause) $
+                    fail "ORDER BY in function calls is not supported."
+                  argExps <- mapM (renderPGTFuncArgExpr cteNames) (NE.toList args)
+                  if isAggregate
+                    then do
+                      let
+                        aggArgConstructor = case maybeAllOrDistinct of
+                          Just True -> ConE 'S.Distincts
+                          _ -> ConE 'S.Alls
+                        npArgs = foldr (\h t -> ConE '(S.:*) `AppE` h `AppE` t) (ConE 'S.Nil) argExps
+                      pure $ squealFn `AppE` (aggArgConstructor `AppE` npArgs)
+                    else do
+                      when (isJust maybeAllOrDistinct) $
+                        fail "DISTINCT is not supported for non-aggregate functions."
+                      pure $ foldl' AppE squealFn argExps
+                PGT_AST.StarFuncApplicationParams ->
+                  if fnNameStrLower == "count"
+                    then pure $ VarE 'S.countStar
+                    else fail "Star argument only supported for COUNT"
+                _ -> fail $ "Unsupported function parameters structure: " <> show params
 
 
 renderPGTFuncArgExpr :: [Text.Text] -> PGT_AST.FuncArgExpr -> Q Exp
