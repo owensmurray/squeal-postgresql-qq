@@ -15,6 +15,7 @@ module Main (main) where
 
 import Data.Aeson (Value)
 import Data.Int (Int32, Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
 import Data.UUID (UUID)
@@ -1587,6 +1588,85 @@ main =
             squealRendering = "SELECT * FROM (VALUES (CURRENT_DATE)) AS t (\"today\")"
           checkStatement squealRendering stmt
 
+        describe "aggregate functions" $ do
+          it "select sum(id) as total_ids from emails" $ do
+            let
+              stmt :: Statement DB () (Field "total_ids" (Maybe Int64), ())
+              stmt = [ssql| select sum(id) as total_ids from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT sum(ALL \"id\") AS \"total_ids\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select sum(all id) as total_ids from emails" $ do
+            let
+              stmt :: Statement DB () (Field "total_ids" (Maybe Int64), ())
+              stmt = [ssql| select sum(all id) as total_ids from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT sum(ALL \"id\") AS \"total_ids\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select sum(distinct id) as total_ids from emails" $ do
+            let
+              stmt :: Statement DB () (Field "total_ids" (Maybe Int64), ())
+              stmt = [ssql| select sum(distinct id) as total_ids from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT sum(DISTINCT \"id\") AS \"total_ids\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select count(distinct id) as distinct_ids from emails" $ do
+            let
+              stmt :: Statement DB () (Field "distinct_ids" Int64, ())
+              stmt = [ssql| select count(distinct id) as distinct_ids from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT count(DISTINCT \"id\") AS \"distinct_ids\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select count(all id) as all_ids from emails" $ do
+            let
+              stmt :: Statement DB () (Field "all_ids" Int64, ())
+              stmt = [ssql| select count(all id) as all_ids from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT count(ALL \"id\") AS \"all_ids\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select avg(id) as avg_id from emails" $ do
+            let
+              stmt
+                :: Statement
+                     DB
+                     ()
+                     ( Field "avg_id" (Maybe Scientific)
+                     , ()
+                     )
+              stmt = [ssql| select avg(id) as avg_id from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT avg(ALL \"id\") AS \"avg_id\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select min(id) as min_id from emails" $ do
+            let
+              stmt :: Statement DB () (Field "min_id" (Maybe Int32), ())
+              stmt = [ssql| select min(id) as min_id from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT min(ALL \"id\") AS \"min_id\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
+          it "select max(id) as max_id from emails" $ do
+            let
+              stmt :: Statement DB () (Field "max_id" (Maybe Int32), ())
+              stmt = [ssql| select max(id) as max_id from emails group by () |]
+              squealRendering :: Text
+              squealRendering =
+                "SELECT max(ALL \"id\") AS \"max_id\" FROM \"emails\" AS \"emails\""
+            checkStatement squealRendering stmt
+
         it "haskell variables in expressions" $ do
           let
             mkStatement
@@ -1962,6 +2042,60 @@ main =
             squealRendering :: Text
             squealRendering =
               "SELECT \"email\" AS \"email\", sum(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_total\" FROM \"emails\" AS \"emails\""
+          checkStatement squealRendering statement
+
+        it "select email, avg(id) over (partition by user_id) as user_avg from emails" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "email" (Maybe Text)
+                   , ( Field "user_avg" (Maybe Scientific)
+                     , ()
+                     )
+                   )
+            statement =
+              [ssql| select email, avg(id) over (partition by user_id) as user_avg from emails |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"email\" AS \"email\", avg(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_avg\" FROM \"emails\" AS \"emails\""
+          checkStatement squealRendering statement
+
+        it "select email, min(id) over (partition by user_id) as user_min from emails" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "email" (Maybe Text)
+                   , ( Field "user_min" (Maybe Int32)
+                     , ()
+                     )
+                   )
+            statement =
+              [ssql| select email, min(id) over (partition by user_id) as user_min from emails |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"email\" AS \"email\", min(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_min\" FROM \"emails\" AS \"emails\""
+          checkStatement squealRendering statement
+
+        it "select email, max(id) over (partition by user_id) as user_max from emails" $ do
+          let
+            statement
+              :: Statement
+                   DB
+                   ()
+                   ( Field "email" (Maybe Text)
+                   , ( Field "user_max" (Maybe Int32)
+                     , ()
+                     )
+                   )
+            statement =
+              [ssql| select email, max(id) over (partition by user_id) as user_max from emails |]
+            squealRendering :: Text
+            squealRendering =
+              "SELECT \"email\" AS \"email\", max(\"id\") OVER (PARTITION BY \"user_id\") AS \"user_max\" FROM \"emails\" AS \"emails\""
           checkStatement squealRendering statement
 
         it
