@@ -1,3 +1,34 @@
+### 0.1.4.0
+
+* New features
+  * Support for SQL window functions (`OVER` clause).
+    * `select name, row_number() over () as rn from users` [✔]
+    * `select name, rank() over (partition by employee_id order by name) as r from users` [✔]
+    * `select email, sum(id) over (partition by user_id) as user_total from emails` [✔]
+    * `select email, avg(id) over (partition by user_id) as user_avg from emails` [✔]
+    * `select email, min(id) over (partition by user_id) as user_min from emails` [✔]
+    * `select email, max(id) over (partition by user_id) as user_max from emails` [✔]
+  * Support for SQL set operations (`UNION`, `INTERSECT`, `EXCEPT`).
+    * `select name from users union select name from users_copy` [✔]
+    * `select name from users union all select name from users_copy` [✔]
+    * `select name from users intersect select name from users_copy` [✔]
+    * `select name from users intersect all select name from users_copy` [✔]
+    * `select name from users except select name from users_copy` [✔]
+    * `select name from users except all select name from users_copy` [✔]
+  * Support for `WITH RECURSIVE` clauses.
+    * `with recursive t as ( select 1 as n union all select (n + 1) as n from t where n < 100) select n from t` [✔]
+    * `with recursive users_cte as ( select id, name from users union all select id, name from users_cte) select * from users_cte` [✔]
+  * Support for aggregate functions (`sum`, `avg`, `min`, `max`).
+    * `select sum(id) as total_ids from emails` [✔]
+    * `select sum(all id) as total_ids from emails` [✔]
+    * `select sum(distinct id) as total_ids from emails` [✔]
+    * `select count(distinct id) as distinct_ids from emails` [✔]
+    * `select count(all id) as all_ids from emails` [✔]
+    * `select avg(id) as avg_id from emails` [✔]
+    * `select min(id) as min_id from emails` [✔]
+    * `select max(id) as max_id from emails` [✔]
+  * Support for `PGnumeric` type, mapping to `Scientific`.
+
 ### 0.1.3.0
 
 * New features
