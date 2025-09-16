@@ -31,6 +31,7 @@ module Squeal.QuasiQuotes.MonoRow (
 
 import Data.Aeson (Value)
 import Data.Int (Int32, Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
 import Data.UUID (UUID)
@@ -39,7 +40,10 @@ import Generics.SOP (SListI)
 import Prelude (Applicative(pure), (<$>), Bool, Maybe)
 import Squeal.PostgreSQL
   ( FromValue(fromValue), IsLabel(fromLabel), NullType(NotNull, Null)
-  , PGType(PGbool, PGdate, PGint4, PGint8, PGjson, PGjsonb, PGtext, PGtimestamptz, PGuuid)
+  , PGType
+    ( PGbool, PGdate, PGint4, PGint8, PGjson, PGjsonb, PGnumeric, PGtext
+    , PGtimestamptz, PGuuid
+    )
   , (:::), Json, Jsonb
   )
 import qualified Squeal.PostgreSQL as Squeal
@@ -77,6 +81,7 @@ type family MonoRow a = b | b -> a where
   MonoRow (fld ::: 'NotNull PGtimestamptz ': more) = (Field fld UTCTime, MonoRow more)
   MonoRow (fld ::: 'NotNull PGjsonb ': more) = (Field fld (Jsonb Value), MonoRow more)
   MonoRow (fld ::: 'NotNull PGjson ': more) = (Field fld (Json Value), MonoRow more)
+  MonoRow (fld ::: 'NotNull PGnumeric ': more) = (Field fld Scientific, MonoRow more)
 
   MonoRow (fld ::: 'Null PGbool ': more) = (Field fld (Maybe Bool), MonoRow more)
   MonoRow (fld ::: 'Null PGint4 ': more) = (Field fld (Maybe Int32), MonoRow more)
@@ -87,6 +92,7 @@ type family MonoRow a = b | b -> a where
   MonoRow (fld ::: 'Null PGtimestamptz ': more) = (Field fld (Maybe UTCTime), MonoRow more)
   MonoRow (fld ::: 'Null PGjsonb ': more) = (Field fld (Maybe (Jsonb Value)), MonoRow more)
   MonoRow (fld ::: 'Null PGjson ': more) = (Field fld (Maybe (Json Value)), MonoRow more)
+  MonoRow (fld ::: 'Null PGnumeric ': more) = (Field fld (Maybe Scientific), MonoRow more)
   MonoRow '[] = ()
 {- FOURMOLU_ENABLE -}
 
