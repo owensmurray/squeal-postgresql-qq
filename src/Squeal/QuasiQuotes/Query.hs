@@ -18,7 +18,7 @@ module Squeal.QuasiQuotes.Query (
 
 import Control.Monad (unless, when, zipWithM)
 import Data.Either (partitionEithers)
-import Data.Foldable (foldlM)
+import Data.Foldable (Foldable(elem, foldl', foldr, length, null), any, foldlM)
 import Data.Function (on)
 import Data.List (groupBy, partition, sortBy)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -30,11 +30,10 @@ import Language.Haskell.TH.Syntax
   )
 import Prelude
   ( Applicative(pure), Bool(False, True), Either(Left, Right), Eq((==))
-  , Foldable(elem, foldl', foldr, length, null), Functor(fmap)
-  , Maybe(Just, Nothing), MonadFail(fail), Num((*), (+), (-), fromInteger)
-  , Ord((<), (>=), compare), Semigroup((<>)), Show(show), Traversable(mapM), ($)
-  , (&&), (++), (.), (<$>), (||), Int, Integer, any, either, error, fromIntegral
-  , id, maybe, otherwise, uncurry, zip
+  , Functor(fmap), Maybe(Just, Nothing), MonadFail(fail)
+  , Num((*), (+), (-), fromInteger), Ord((<), (>=), compare), Semigroup((<>))
+  , Show(show), Traversable(mapM), ($), (&&), (++), (.), (<$>), (||), Int
+  , Integer, either, error, fromIntegral, id, maybe, otherwise, uncurry, zip
   )
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.List.NonEmpty as NE
