@@ -474,10 +474,18 @@ renderValuesClauseToNP cteNames maybeColAliases (firstRowExps NE.:| restRowExps)
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
 renderPGTForLockingClauseItems = \case
+  -- PostgreSQL's `FOR READ ONLY` does not acquire row-level locks and is
+  -- effectively equivalent to the absence of a row-locking clause for
+  -- SELECT. Squeal does not expose a row-level "read only" lock; instead,
+  -- read-only behavior is an AccessMode on the transaction
+  -- (TransactionMode { accessMode = ReadOnly }).
+  --
+  -- We therefore accept and ignore `FOR READ ONLY` here so that the quoted
+  -- SQL compiles and renders identically to the same query without the
+  -- clause. To enforce read-only semantics, execute the statement inside a
+  -- transaction whose AccessMode is ReadOnly.
   PGT_AST.ReadOnlyForLockingClause ->
-    fail $
-      "FOR READ ONLY is not supported as a row-level locking "
-        <> "clause by Squeal-QQ."
+    pure []
   PGT_AST.ItemsForLockingClause itemsNe ->
     mapM renderPGTForLockingItem (NE.toList itemsNe)
 

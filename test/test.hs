@@ -1870,6 +1870,71 @@ main =
           squealRendering = "SELECT * FROM \"users\" AS \"users\" FOR UPDATE"
         checkStatement squealRendering statement
 
+      it "select * from users for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select * from users for read only |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select * from users where name = 'bob' for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select * from users where name = 'bob' for read only |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'bob' :: text))"
+        checkStatement squealRendering statement
+
+      it "with users_cte as (select * from users) select * from users_cte for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement =
+            [ssql|
+              with users_cte as (select * from users)
+              select * from users_cte for read only
+            |]
+          squealRendering :: Text
+          squealRendering =
+            "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\") SELECT * FROM \"users_cte\" AS \"users_cte\""
+        checkStatement squealRendering statement
+
       it "select * from jsonb_test" $ do
         let
           statement
