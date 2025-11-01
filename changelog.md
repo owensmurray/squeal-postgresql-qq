@@ -1,4 +1,4 @@
-### Next version
+### 0.1.5.0
 
 * New features
   * Support multi-row VALUES in SELECT statements. [✔]
