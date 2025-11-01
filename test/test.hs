@@ -533,6 +533,68 @@ main =
           squealRendering = "SELECT * FROM (VALUES (1, (E'text_val' :: text))) AS t (\"num\", \"txt\")"
         checkStatement squealRendering statement
 
+      it "values (1, 'a'), (2, 'b')" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "_column1" Int64
+                 , ( Field "_column2" Text
+                   , ()
+                   )
+                 )
+          statement = [ssql| values (1, 'a'), (2, 'b') |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM (VALUES (1, (E'a' :: text)), (2, (E'b' :: text))) AS t (\"_column1\", \"_column2\")"
+        checkStatement squealRendering statement
+
+      it "values (1, 'a')" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "_column1" Int64
+                 , ( Field "_column2" Text
+                   , ()
+                   )
+                 )
+          statement = [ssql| values (1, 'a') |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM (VALUES (1, (E'a' :: text))) AS t (\"_column1\", \"_column2\")"
+        checkStatement squealRendering statement
+
+      it "select * from (values (1, 'a'), (2, 'b')) as t (n, s)" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "n" Int64
+                 , ( Field "s" Text
+                   , ()
+                   )
+                 )
+          statement =
+            [ssql| select * from (values (1, 'a'), (2, 'b')) as t (n, s) |]
+          squealRendering :: Text
+          squealRendering =
+            "SELECT * FROM (SELECT * FROM (VALUES (1, (E'a' :: text)), (2, (E'b' :: text))) AS t (\"n\", \"s\")) AS \"t\""
+        checkStatement squealRendering statement
+
+      -- Selecting FROM a subquery (VALUES ...) alias is not yet supported by
+      -- the translator (SelectTableRef). This can be added in a follow-up.
+
+
+      -- Negative tests (compile-time failures) cannot be included in the
+      -- test suite because the quasiquoter fails during compilation.
+
+      -- Selecting FROM a subquery (VALUES ...) alias is not yet supported by
+      -- the translator (SelectTableRef). This can be added in a follow-up.
+
       describe "group by" $ do
         it "select name from users group by name" $ do
           let
@@ -1806,6 +1868,71 @@ main =
           statement = [ssql| select * from users for update |]
           squealRendering :: Text
           squealRendering = "SELECT * FROM \"users\" AS \"users\" FOR UPDATE"
+        checkStatement squealRendering statement
+
+      it "select * from users for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select * from users for read only |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"users\" AS \"users\""
+        checkStatement squealRendering statement
+
+      it "select * from users where name = 'bob' for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement = [ssql| select * from users where name = 'bob' for read only |]
+          squealRendering :: Text
+          squealRendering = "SELECT * FROM \"users\" AS \"users\" WHERE (\"name\" = (E'bob' :: text))"
+        checkStatement squealRendering statement
+
+      it "with users_cte as (select * from users) select * from users_cte for read only" $ do
+        let
+          statement
+            :: Statement
+                 DB
+                 ()
+                 ( Field "id" Text
+                 , ( Field "name" Text
+                   , ( Field "employee_id" UUID
+                     , ( Field "bio" (Maybe Text)
+                       , ()
+                       )
+                     )
+                   )
+                 )
+          statement =
+            [ssql|
+              with users_cte as (select * from users)
+              select * from users_cte for read only
+            |]
+          squealRendering :: Text
+          squealRendering =
+            "WITH \"users_cte\" AS (SELECT * FROM \"users\" AS \"users\") SELECT * FROM \"users_cte\" AS \"users_cte\""
         checkStatement squealRendering statement
 
       it "select * from jsonb_test" $ do

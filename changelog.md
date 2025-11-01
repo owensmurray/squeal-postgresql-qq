@@ -1,3 +1,13 @@
+### 0.1.5.0
+
+* New features
+  * Support multi-row VALUES in SELECT statements. [✔]
+    * `values (1, 'a'), (2, 'b')` [✔]
+    * `select * from (values (1, 'a'), (2, 'b')) as t (n, s)` [✔]
+  * Support `FOR READ ONLY` locking clause in SELECT statements.
+    The clause is accepted and treated as a no-op during translation to
+    Squeal, matching PostgreSQL semantics for plain SELECTs.
+
 ### 0.1.4.0
 
 * New features

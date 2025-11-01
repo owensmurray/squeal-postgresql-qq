@@ -16,9 +16,9 @@ module Squeal.QuasiQuotes.Query (
   getIdentText,
 ) where
 
-import Control.Monad (unless, when, zipWithM)
+import Control.Monad (when, zipWithM)
 import Data.Either (partitionEithers)
-import Data.Foldable (Foldable(elem, foldl', foldr, length, null), any, foldlM)
+import Data.Foldable (Foldable(elem, foldl', foldr, length, null), any, foldlM, mapM_)
 import Data.Function (on)
 import Data.List (groupBy, partition, sortBy)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -262,16 +262,16 @@ toSquealSimpleSelect cteNames maybeColAliases simpleSelect maybeSortClause maybe
 
       pure $ squealOp `AppE` leftQuery `AppE` rightQuery
     PGT_AST.ValuesSimpleSelect valuesClause -> do
-      unless
-        ( isNothing maybeSortClause
-            && isNothing maybeSelectLimit
-            && isNothing maybeForLockingClause
+      when
+        ( isJust maybeSortClause
+            || isJust maybeSelectLimit
+            || isJust maybeForLockingClause
         )
         $ fail
         $ "ORDER BY / OFFSET / LIMIT / FOR UPDATE etc. not supported with VALUES clause "
           <> "in this translation yet."
-      renderedValues <- renderValuesClauseToNP cteNames maybeColAliases valuesClause
-      pure $ VarE 'S.values_ `AppE` renderedValues
+      valuesExp <- renderValuesClauseToNP cteNames maybeColAliases valuesClause
+      pure valuesExp
     PGT_AST.NormalSimpleSelect
       maybeTargeting
       maybeIntoClause
@@ -429,45 +429,63 @@ renderValuesClauseToNP
   -> PGT_AST.ValuesClause
   -> Q Exp
 renderValuesClauseToNP cteNames maybeColAliases (firstRowExps NE.:| restRowExps) = do
-    unless (null restRowExps) $
-      fail $
-        "Multi-row VALUES clause requires S.values, this translation "
-          <> "currently supports single row S.values_."
-    convertRowToNP firstRowExps
-  where
-    colAliasTexts = fmap (fmap getIdentText . NE.toList) maybeColAliases
+    let
+      firstRowList = NE.toList firstRowExps
+      restRowsLists = fmap NE.toList restRowExps
 
-    convertRowToNP :: NE.NonEmpty PGT_AST.AExpr -> Q Exp
-    convertRowToNP exprs = do
-        let
-          exprList = NE.toList exprs
-        aliasTexts <-
-          case colAliasTexts of
-            Just aliases ->
-              if length aliases == length exprList
-                then pure aliases
-                else
-                  fail
-                    "Number of column aliases in CTE does not match number of columns in VALUES clause."
-            Nothing -> pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
-        go (zip exprList aliasTexts)
-      where
-        go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
-        go [] = pure $ ConE 'S.Nil
-        go ((expr, aliasText) : fs) = do
-          renderedExpr <- renderPGTAExpr cteNames expr
-          let
-            aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
-          restExp <- go fs
-          pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
+    -- Determine column aliases based on provided aliases or synthesize.
+    aliasTexts <-
+      case fmap (fmap getIdentText . NE.toList) maybeColAliases of
+        Just aliases ->
+          if length aliases == length firstRowList
+            then pure aliases
+            else
+              fail
+                "Number of column aliases does not match number of columns in VALUES clause."
+        Nothing ->
+          pure $ fmap (Text.pack . ("_column" <>) . show) [1 :: Int ..]
+
+    -- Validate all rows have consistent arity.
+    let expectedLen = length firstRowList
+    let checkLen xs = if length xs == expectedLen
+          then pure ()
+          else fail "Mismatched number of columns across VALUES rows."
+    mapM_ checkLen restRowsLists
+
+    -- Helper to convert a row to an NP using the established aliases.
+    let convertRow :: [PGT_AST.AExpr] -> Q Exp
+        convertRow exprs = go (zip exprs aliasTexts)
+          where
+            go :: [(PGT_AST.AExpr, Text.Text)] -> Q Exp
+            go [] = pure $ ConE 'S.Nil
+            go ((expr, aliasText) : fs) = do
+              renderedExpr <- renderPGTAExpr cteNames expr
+              let aliasedExp = VarE 'S.as `AppE` renderedExpr `AppE` LabelE (Text.unpack aliasText)
+              restExp <- go fs
+              pure $ ConE '(S.:*) `AppE` aliasedExp `AppE` restExp
+
+    firstRowNP <- convertRow firstRowList
+    case restRowsLists of
+      [] -> pure $ VarE 'S.values_ `AppE` firstRowNP
+      more -> do
+        moreNPs <- mapM convertRow more
+        pure $ VarE 'S.values `AppE` firstRowNP `AppE` ListE moreNPs
 
 
 renderPGTForLockingClauseItems :: PGT_AST.ForLockingClause -> Q [Exp]
 renderPGTForLockingClauseItems = \case
+  -- PostgreSQL's `FOR READ ONLY` does not acquire row-level locks and is
+  -- effectively equivalent to the absence of a row-locking clause for
+  -- SELECT. Squeal does not expose a row-level "read only" lock; instead,
+  -- read-only behavior is an AccessMode on the transaction
+  -- (TransactionMode { accessMode = ReadOnly }).
+  --
+  -- We therefore accept and ignore `FOR READ ONLY` here so that the quoted
+  -- SQL compiles and renders identically to the same query without the
+  -- clause. To enforce read-only semantics, execute the statement inside a
+  -- transaction whose AccessMode is ReadOnly.
   PGT_AST.ReadOnlyForLockingClause ->
-    fail $
-      "FOR READ ONLY is not supported as a row-level locking "
-        <> "clause by Squeal-QQ."
+    pure []
   PGT_AST.ItemsForLockingClause itemsNe ->
     mapM renderPGTForLockingItem (NE.toList itemsNe)
 
@@ -788,6 +806,21 @@ renderSingleTableRef cteNames = \case
   PGT_AST.RelationExprTableRef relationExpr maybeAliasClause sampleClause -> do
     when (isJust sampleClause) $ fail "TABLESAMPLE clause is not supported yet."
     renderPGTRelationExprTableRef cteNames relationExpr maybeAliasClause
+  -- Support subqueries (including VALUES ...) in FROM with optional column aliases
+  PGT_AST.SelectTableRef isLateral selectWithParens maybeAliasClause -> do
+    when isLateral $ fail "LATERAL subqueries are not supported yet."
+    -- Alias is required for subqueries in FROM in PostgreSQL; enforce here
+    (aliasStr, maybeColAliases) <-
+      case maybeAliasClause of
+        Just (PGT_AST.AliasClause _ aliasIdent maybeCols) -> do
+          let aliasTxt = Text.unpack (getIdentText aliasIdent)
+          pure (aliasTxt, maybeCols)
+        Nothing -> fail "Subquery in FROM requires an alias."
+    -- Propagate any provided column aliases down into the subquery translation
+    subqueryExp <- toSquealSelectWithParens cteNames maybeColAliases selectWithParens
+    -- Treat the subquery as a derived table in the FROM clause
+    -- Using S.subquery (as subquery alias)
+    pure $ VarE 'S.subquery `AppE` (VarE 'S.as `AppE` subqueryExp `AppE` LabelE aliasStr)
   PGT_AST.JoinTableRef joinedTable maybeAliasClause ->
     -- If `maybeAliasClause` is Just, it means `(JOIN_TABLE) AS alias`.
     -- Squeal's direct join combinators don't alias the *result* of the join.
