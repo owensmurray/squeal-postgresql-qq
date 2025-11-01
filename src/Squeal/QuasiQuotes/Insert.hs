@@ -250,21 +250,47 @@ renderPGTValueRow cteNames colItems exprs
             `AppE` LabelE colNameStr
 
 
+--
+-- ON CONFLICT support note
+-- -------------------------
+-- As of the pinned upstream `squeal-postgresql` (0.9.2.0), the
+-- `ConflictTarget` GADT only exposes `OnConstraint` and there is no
+-- clause form for a targetless `ON CONFLICT DO NOTHING`.
+--
+-- Consequently, this quasiquoter intentionally fails fast when the parsed
+-- `PostgresqlSyntax` AST requests either:
+--   * a targetless ON CONFLICT (i.e. DO NOTHING without a target), or
+--   * a column-list conflict target (i.e. ON CONFLICT (col[, ...]) ...).
+--
+-- When upstream adds the necessary constructors (e.g. an `OnColumns`
+-- conflict target and a clause for targetless `DO NOTHING`), this is the
+-- place to wire them through. See `plan.md` for the backlog item.
 renderOnConflict :: [Text.Text] -> PGT_AST.OnConflict -> Q Exp
 renderOnConflict cteNames (PGT_AST.OnConflict maybeConfExpr onConflictDo) = do
   conflictActionExp <- renderOnConflictDo cteNames onConflictDo
   case maybeConfExpr of
-    Nothing -> fail "ON CONFLICT without a conflict target is not supported yet."
+    Nothing ->
+      fail
+        (  "ON CONFLICT without a conflict target (i.e. targetless DO NOTHING) "
+        <> "cannot be represented with squeal-postgresql 0.9.2.0. "
+        <> "Only ON CONFLICT ON CONSTRAINT ... is currently available. "
+        <> "See plan.md for the proposed upstream changes and status."
+        )
     Just confExpr -> do
       conflictTargetExp <- renderConfExpr confExpr
       pure $ ConE 'S.OnConflict `AppE` conflictTargetExp `AppE` conflictActionExp
 
+-- See the ON CONFLICT support note above.
 renderConfExpr :: PGT_AST.ConfExpr -> Q Exp
 renderConfExpr = \case
   PGT_AST.ConstraintConfExpr name ->
     pure $ ConE 'S.OnConstraint `AppE` LabelE (Text.unpack (getIdentText name))
   PGT_AST.WhereConfExpr _ _ ->
-    fail "ON CONFLICT (columns) is not supported yet. Use ON CONFLICT ON CONSTRAINT."
+    fail
+      (  "ON CONFLICT (columns ...) is not supported by squeal-postgresql 0.9.2.0. "
+      <> "Only ON CONFLICT ON CONSTRAINT ... is currently available. "
+      <> "See plan.md for the proposed upstream changes and status."
+      )
 
 renderOnConflictDo :: [Text.Text] -> PGT_AST.OnConflictDo -> Q Exp
 renderOnConflictDo cteNames = \case
