@@ -1,3 +1,10 @@
+### Next version
+
+* New features
+  * Support multi-row VALUES in SELECT statements. [✔]
+    * `values (1, 'a'), (2, 'b')` [✔]
+    * `select * from (values (1, 'a'), (2, 'b')) as t (n, s)` [✔]
+
 ### 0.1.4.0
 
 * New features
