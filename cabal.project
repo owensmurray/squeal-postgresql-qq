@@ -7,6 +7,8 @@ package squeal-postgresql-qq
 allow-newer:
   records-sop:ghc-prim
   , records-sop:deepseq
+  , *:base
+  , *:template-haskell
 
 
 constraints:
