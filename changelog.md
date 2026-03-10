@@ -1,3 +1,8 @@
+### 0.1.5.1
+
+* Build / compatibility
+  * Support GHC 9.14.
+
 ### 0.1.5.0
 
 * New features
