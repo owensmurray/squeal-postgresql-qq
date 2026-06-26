@@ -1,3 +1,8 @@
+### 0.1.5.2
+
+* Build / compatibility
+  * Relax upper bounds on `aeson` and `time` for newer releases.
+
 ### 0.1.5.1
 
 * Build / compatibility
